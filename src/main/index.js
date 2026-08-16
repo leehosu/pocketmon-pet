@@ -292,7 +292,7 @@ async function fetchMoves(species) {
       fetch(typeUrl(species)).then((r) => r.json()),
     ]);
     const learnable = new Set((pk.moves || []).map((m) => m.move.name));
-    const typeMoves = (ty.moves || []).map((m) => m.name).filter((n) => learnable.has(n)).slice(0, 4);
+    const typeMoves = (ty.moves || []).map((m) => m.name).filter((n) => learnable.has(n)).slice(0, 2);
     const variants = MOVE_EFFECTS[species] || ['leaf'];
     const out = [];
     for (let i = 0; i < typeMoves.length; i++) {
