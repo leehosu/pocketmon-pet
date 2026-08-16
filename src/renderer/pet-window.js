@@ -209,6 +209,8 @@ if (typeof window !== 'undefined') {
       if (changes.hatched) triggerReact('부화!');
       else if (changes.evolved) triggerReact('진화!');
       else if (changes.leveledUp) triggerReact('Lv↑');
+      // 부화/진화 순간에도 울음소리(진화면 새 단계 소리 — currentCry가 위에서 갱신됨)
+      if (changes.hatched || changes.evolved) playCry();
     }
 
     if (command === 'showStatus') {
