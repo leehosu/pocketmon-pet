@@ -292,7 +292,10 @@ async function fetchMoves(species, stage) {
       fetch(typeUrl(species)).then((r) => r.json()),
     ]);
     const learnable = new Set((pk.moves || []).map((m) => m.move.name));
-    const typeMoves = (ty.moves || []).map((m) => m.name).filter((n) => learnable.has(n)).slice(0, 2);
+    const all = (ty.moves || []).map((m) => m.name).filter((n) => learnable.has(n));
+    // 단계별로 목록의 다른 구간에서 2개 선택 → 진화할 때마다 기술이 바뀌도록.
+    const start = Math.max(0, Math.min(stage, all.length - 2));
+    const typeMoves = all.slice(start, start + 2);
     const variants = MOVE_EFFECTS[species] || ['leaf'];
     const out = [];
     for (let i = 0; i < typeMoves.length; i++) {
