@@ -29,6 +29,19 @@
     font:9px monospace;color:#fff;text-shadow:0 0 2px #000,0 0 2px #000;
     white-space:nowrap;
   }
+  /* 더블클릭 상세 패널 (평상시 숨김; 열리면 메인이 창을 확장) */
+  #detail{
+    position:absolute;left:2px;top:98px;width:196px;
+    box-sizing:border-box;padding:8px 10px;
+    background:rgba(14,15,26,.92);border:1px solid #2c3050;border-radius:8px;
+    color:#e8eaff;font:10px/1.5 monospace;
+    opacity:0;transition:opacity .15s ease;pointer-events:none;
+    -webkit-app-region:no-drag;
+  }
+  #detail .d-name{font-size:13px;font-weight:bold;margin-bottom:5px;color:#f8c838;}
+  #detail .d-row{display:flex;justify-content:space-between;gap:8px;}
+  #detail .d-row span{color:#9aa0c8;}
+  #detail .d-row b{font-weight:600;text-align:right;}
 </style></head>
 <body>
   <canvas id="pet" width="96" height="96"></canvas>
@@ -37,6 +50,7 @@
     <div id="xp-bar"><div id="xp-fill"></div></div>
     <div id="status"></div>
   </div>
+  <div id="detail"></div>
   <script type="module" src="./pet-window.js"></script>
 </body>
 </html>

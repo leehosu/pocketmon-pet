@@ -1,7 +1,7 @@
 import { getFrames } from '../core/sprites/index.js';
 import { PALETTE } from '../core/sprites/palette.js';
 import { drawFrame } from './canvas-render.js';
-import { xpForLevel } from '../core/xp-engine.js';
+import { xpForLevel, XP_RULES } from '../core/xp-engine.js';
 import { getSpeciesByKey } from '../core/roster.js';
 import { customCandidates } from '../core/sprite-files.js';
 
@@ -23,6 +23,42 @@ export function nextFrameIndex({ tickCount, frameCount }) {
 
 export function hudVisible({ hovering, pinned }) {
   return Boolean(hovering || pinned);
+}
+
+// 더블클릭 상세 패널용 값 계산(순수). species는 getSpeciesByKey 결과(없으면 undefined).
+export function statusDetail(state, species, xpFor, dailyCap) {
+  const level = state.level || 1;
+  const stage = state.stage || 0;
+  const total = state.xp || 0;
+  const curFloor = xpFor(level);
+  const nextFloor = xpFor(level + 1);
+  const name = species ? (species.stages[stage]?.name || species.key) : '???';
+  const type = species ? species.type : '?';
+
+  let evolveText;
+  if (!species) {
+    evolveText = '—';
+  } else if (stage >= 2) {
+    evolveText = '최종 진화 완료';
+  } else {
+    const evLv = species.evolveLevels[stage]; // stage0→e1, stage1→e2
+    const nextName = species.stages[stage + 1]?.name || '?';
+    const remain = Math.max(0, evLv - level);
+    evolveText = `${nextName}까지 Lv.${evLv} (${remain} 남음)`;
+  }
+
+  return {
+    name, type, stage,
+    stageLabel: `${stage + 1}/3단계`,
+    level,
+    xpInLevel: total - curFloor,
+    xpNeededThisLevel: Math.max(0, nextFloor - curFloor),
+    xpToNext: Math.max(0, nextFloor - total),
+    totalXp: total,
+    evolveText,
+    dailyXp: state.dailyXp || 0,
+    dailyCap,
+  };
 }
 
 // available(Set 또는 배열)에 존재하는 첫 customCandidates 키를 반환, 없으면 null.
@@ -54,6 +90,7 @@ if (typeof window !== 'undefined') {
   const hudEl = document.getElementById('hud');
   const xpFillEl = document.getElementById('xp-fill');
   const statusEl = document.getElementById('status');
+  const detailEl = document.getElementById('detail');
 
   let latest = null; // 마지막으로 수신한 { state, changes, activity, command }
 
@@ -66,6 +103,7 @@ if (typeof window !== 'undefined') {
   // 애니메이션/상호작용 상태
   let hovering = false;
   let pinned = false;
+  let detailOpen = false;
   let skillActive = false;
   let reacting = false;
   let busy = false;
@@ -133,6 +171,7 @@ if (typeof window !== 'undefined') {
     }
 
     if (state) renderHud(state);
+    if (detailOpen) renderDetail(); // 상세 패널이 열려 있으면 최신 상태로 갱신
   }
 
   function renderHud(state) {
@@ -151,6 +190,34 @@ if (typeof window !== 'undefined') {
   function updateHud() {
     const visible = hudVisible({ hovering, pinned });
     hudEl.style.opacity = visible ? '1' : '0';
+  }
+
+  function renderDetail() {
+    if (!detailOpen) { detailEl.style.opacity = '0'; return; }
+    const state = latest && latest.state;
+    if (!state) return;
+    const d = statusDetail(state, getSpeciesByKey(state.species), xpForLevel, XP_RULES.dailyCap);
+    detailEl.innerHTML = [
+      `<div class="d-name">${d.name}</div>`,
+      `<div class="d-row"><span>타입</span><b>${d.type}</b></div>`,
+      `<div class="d-row"><span>단계</span><b>${d.stageLabel}</b></div>`,
+      `<div class="d-row"><span>레벨</span><b>Lv.${d.level}</b></div>`,
+      `<div class="d-row"><span>이번 레벨</span><b>${d.xpInLevel}/${d.xpNeededThisLevel} XP</b></div>`,
+      `<div class="d-row"><span>다음 레벨까지</span><b>${d.xpToNext} XP</b></div>`,
+      `<div class="d-row"><span>총 경험치</span><b>${d.totalXp} XP</b></div>`,
+      `<div class="d-row"><span>진화</span><b>${d.evolveText}</b></div>`,
+      `<div class="d-row"><span>오늘 획득</span><b>${d.dailyXp}/${d.dailyCap} XP</b></div>`,
+    ].join('');
+    detailEl.style.opacity = '1';
+  }
+
+  function toggleDetail() {
+    detailOpen = !detailOpen;
+    // 메인에 창 크기 변경 요청(상세 패널을 담기 위해 확장 / 닫으면 원복)
+    if (window.pkmn && typeof window.pkmn.setDetail === 'function') {
+      window.pkmn.setDetail(detailOpen);
+    }
+    renderDetail();
   }
 
   canvas.addEventListener('mouseenter', () => { hovering = true; updateHud(); });
@@ -184,13 +251,28 @@ if (typeof window !== 'undefined') {
     }
   });
 
+  // 클릭/더블클릭 구분: 단일 클릭 = 기본 HUD 핀 토글, 더블클릭 = 상세 패널 토글.
+  // 첫 클릭은 DBLCLICK_MS 동안 보류했다가, 그 안에 두 번째 클릭이 오면 더블클릭으로 처리한다.
+  const DBLCLICK_MS = 250;
+  let clickTimer = null;
+
   window.addEventListener('mouseup', () => {
     if (!dragging) return;
     dragging = false;
     canvas.style.cursor = 'grab';
-    if (movedTotal < CLICK_THRESHOLD_PX) {
-      pinned = !pinned; // 이동이 거의 없었다 → 클릭으로 간주해 핀 토글
-      updateHud();
+    if (movedTotal >= CLICK_THRESHOLD_PX) return; // 드래그였음 → 클릭 아님
+
+    if (clickTimer) {
+      // 두 번째 클릭 → 더블클릭
+      clearTimeout(clickTimer);
+      clickTimer = null;
+      toggleDetail();
+    } else {
+      clickTimer = setTimeout(() => {
+        clickTimer = null;
+        pinned = !pinned; // 단일 클릭 → 기본 HUD 핀 토글
+        updateHud();
+      }, DBLCLICK_MS);
     }
   });
 
