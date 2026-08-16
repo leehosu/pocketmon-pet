@@ -141,6 +141,7 @@ if (typeof window !== 'undefined') {
   // 여기서는 받을 때마다 누적 교체한다 — 안 오면 이전 값을 그대로 유지.
   const customImages = new Map(); // key -> HTMLImageElement
   let customKeys = new Set();     // 로드된(로드 시도된) key 집합
+  let currentCry = null;          // 현재 종/단계 울음소리 data URL(PokéAPI 런타임 캐시)
 
   // 애니메이션/상호작용 상태
   let hovering = false;
@@ -184,7 +185,8 @@ if (typeof window !== 'undefined') {
 
   function applyState(payload) {
     latest = payload;
-    const { state, changes, activity, command, customSprites } = payload;
+    const { state, changes, activity, command, customSprites, cry } = payload;
+    if (cry) currentCry = cry; // 종/단계 바뀔 때만 실려옴 → 저장
 
     if (customSprites) {
       // 변경분이 실려온 tick — (재)로드. 로드 실패 시 해당 key는 캐시에 안 잡히므로
@@ -344,8 +346,14 @@ if (typeof window !== 'undefined') {
       clickTimer = null;
       pinned = !pinned; // 단일 클릭 → 기본 HUD 핀 토글
       updateHud();
+      playCry();        // 클릭하면 울음소리(있으면)
     }, DBLCLICK_MS);
   });
+
+  function playCry() {
+    if (!currentCry) return;
+    try { const a = new Audio(currentCry); a.volume = 0.6; a.play().catch(() => {}); } catch { /* ignore */ }
+  }
 
   // 네이티브 더블클릭 → 대기 중인 단일클릭(핀) 취소 후 상세 패널 토글.
   canvas.addEventListener('dblclick', () => {

@@ -15,7 +15,7 @@ import { getSpeciesByKey, canEvolve } from '../core/roster.js';
 import { parseSessionLines } from '../core/session-parser.js';
 import { tick, ensureStarter } from './orchestrator.js';
 import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
-import { dexLine, spriteUrl } from '../core/pokeapi.js';
+import { dexLine, spriteUrl, cryUrl } from '../core/pokeapi.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -58,6 +58,7 @@ let intervalId = null;
 let driftDir = 1;
 let state = null;
 let lastManualMoveAt = 0;
+let lastCrySig = null; // 렌더러에 마지막으로 보낸 울음소리(종_단계) 시그니처
 
 // ---- readEvents(): hook이 append하는 서명된 events.jsonl을 증분 읽기 + 검증 ----
 // 서명(sig)이 없거나 위조된 이벤트는 조용히 버린다(치팅 방지) — 앱이 XP의 유일한 권위.
@@ -254,12 +255,38 @@ function fetchSpeciesSprites(key) {
   const line = dexLine(key);
   if (!line.length) return;
   const dir = spritesDirPath();
-  try { mkdirSync(dir, { recursive: true }); } catch { return; }
+  const cdir = criesDirPath();
+  try { mkdirSync(dir, { recursive: true }); mkdirSync(cdir, { recursive: true }); } catch { return; }
   line.forEach((dexId, stage) => {
-    const dest = join(dir, `${key}_${stage}.png`);
-    if (existsSync(dest)) return;
-    downloadTo(spriteUrl(dexId), dest, () => { /* 성공/실패 모두 별도 처리 불필요 */ });
+    const png = join(dir, `${key}_${stage}.png`);
+    if (!existsSync(png)) downloadTo(spriteUrl(dexId), png, () => {});
+    // 울음소리(.ogg)도 같은 방식으로 런타임 캐시.
+    const ogg = join(cdir, `${key}_${stage}.ogg`);
+    if (!existsSync(ogg)) downloadTo(cryUrl(dexId), ogg, () => {});
   });
+}
+
+function criesDirPath() { return join(dataDir(), 'cries'); }
+
+// 현재(부화 후) 종·단계의 울음소리를 data URL로 읽음(없으면 null).
+function cryDataUrl(species, stage) {
+  try {
+    const p = join(criesDirPath(), `${species}_${stage}.ogg`);
+    if (!existsSync(p)) return null;
+    return 'data:audio/ogg;base64,' + readFileSync(p).toString('base64');
+  } catch { return null; }
+}
+
+// 종/단계가 바뀌었고 파일이 준비됐을 때만 payload에 cry(data URL)를 실어 렌더러에 전달
+// (매 tick 재전송 방지). lastCrySig로 게이트.
+function attachCry(payload) {
+  if (!state || !state.hatched || !state.species) return;
+  const sig = `${state.species}_${state.stage || 0}`;
+  if (sig === lastCrySig) return;
+  const url = cryDataUrl(state.species, state.stage || 0);
+  if (!url) return; // 아직 다운로드 전 → 다음 tick에
+  payload.cry = url;
+  lastCrySig = sig;
 }
 
 function computeSpritesSignature(dir) {
@@ -309,6 +336,7 @@ function runTick() {
   driftWindow(result.activity);
   const customSprites = refreshCustomSpritesIfChanged();
   if (customSprites) result.customSprites = customSprites; // 최초 1회 + 변경 시에만 포함
+  attachCry(result); // 종/단계 바뀌었고 파일 준비되면 울음소리 data URL 전달
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('state', result);
   }
@@ -346,11 +374,13 @@ function createWindow() {
 // 부화/진화 등 상태 변화를 즉시 렌더러에 알림(다음 tick을 기다리지 않고).
 function broadcastState(changes) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send('state', {
+  const payload = {
     state,
     changes: { leveledUp: false, evolved: false, xpGained: 0, reactions: 0, ...changes },
     activity: { busy: Boolean(state?.busy), skillPulse: false },
-  });
+  };
+  attachCry(payload);
+  mainWindow.webContents.send('state', payload);
 }
 
 function sendMenuCommand(command) {

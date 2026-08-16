@@ -5,6 +5,9 @@
 
 export const SPRITE_BASE =
   'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
+// 울음소리도 앱에 번들하지 않고 공개 PokéAPI cries 저장소에서 런타임에 받는다.
+export const CRY_BASE =
+  'https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest';
 
 // 로스터 종 키 → 진화 3단계 국가도감 번호.
 const DEX = {
@@ -20,4 +23,8 @@ export function dexLine(key) {
 
 export function spriteUrl(dexId) {
   return `${SPRITE_BASE}/${dexId}.png`;
+}
+
+export function cryUrl(dexId) {
+  return `${CRY_BASE}/${dexId}.ogg`;
 }
