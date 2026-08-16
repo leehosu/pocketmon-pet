@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "electron": "^43.4.0",
-    "vitest": "^4.1.10"
+    "electron": "41.7.1",
+    "vitest": "^3.2.7"
   }
 }
