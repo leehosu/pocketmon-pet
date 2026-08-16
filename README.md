@@ -1,6 +1,6 @@
-# 포켓몬 데스크톱 버디
+# pocketmon-pet
 
-Claude Code로 코딩하는 동안 화면 위를 떠다니는 8비트 포켓몬 데스크톱 펫입니다.
+Claude Code / Codex로 코딩하는 동안 화면 위를 떠다니는 8비트 포켓몬 데스크톱 펫입니다.
 당신이 도구를 쓰고 세션을 진행할수록 XP를 얻어 레벨업하고, 일정 레벨에 도달하면
 진화합니다. Electron 기반 투명·항상-위(always-on-top) 창으로 동작하며, 상태는
 `~/.pocketmon/`에 저장되어 앱을 재설치해도 같은 포켓몬·레벨을 유지합니다.
@@ -45,8 +45,10 @@ npm start
 XP는 두 경로로 들어옵니다 (`src/core/xp-engine.js`):
 
 - **Hook 이벤트**: 도구 사용 +2 XP, 세션 시작 +5 XP
-- **토큰 사용량**(`~/.claude/projects/**/*.jsonl` 파싱 — Claude Code 자신의
-  로그가 곧 권위 소스): 1,000 토큰당 +1 XP
+- **토큰 사용량**(권위 소스 = 에이전트 자신의 세션 로그): 1,000 토큰당 +1 XP
+  - Claude Code: `~/.claude/projects/**/*.jsonl`의 `message.usage`
+  - Codex: `~/.codex/sessions/**/rollout-*.jsonl`의 `token_count` 이벤트
+  - 두 소스는 같은 XP 풀에 합산되며, 별도 설정 없이 자동으로 인식됩니다.
 
 일일 상한(daily cap)은 **500 XP**로, 하루치 XP 유입을 이 값에서 클램프합니다.
 레벨은 XP에서 매번 재계산합니다: `필요 XP = floor(100 × level^1.5)`.

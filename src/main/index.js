@@ -11,7 +11,7 @@ import https from 'node:https';
 import { dataDir, EVENTS_FILE } from '../core/paths.js';
 import { loadState, saveState, rollStarter } from '../core/store.js';
 import { getSpeciesByKey, canEvolve } from '../core/roster.js';
-import { parseSessionLines } from '../core/session-parser.js';
+import { parseSessionLines, parseCodexLines } from '../core/session-parser.js';
 import { tick, ensureStarter } from './orchestrator.js';
 import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
 import { dexLine, spriteUrl, cryUrl, pokemonUrl, typeUrl, moveUrl } from '../core/pokeapi.js';
@@ -137,9 +137,8 @@ function listJsonlFilesRecursive(dir) {
   return out;
 }
 
-function readSessionEvents(sinceTs) {
-  const floor = sinceTs > 0 ? sinceTs : Date.now() - FIRST_RUN_SESSION_WINDOW_MS;
-  const root = join(homedir(), '.claude', 'projects');
+// 한 로그 루트를 재귀 스캔해 (parser로) 토큰 이벤트를 뽑는다. floor 이전 파일은 mtime으로 건너뜀.
+function scanSessionRoot(root, floor, parser) {
   if (!existsSync(root)) return [];
   const events = [];
   for (const file of listJsonlFilesRecursive(root)) {
@@ -148,9 +147,19 @@ function readSessionEvents(sinceTs) {
     if (st.mtimeMs < floor) continue; // 이 파일에 floor 이후 새 내용이 없음
     let content;
     try { content = readFileSync(file, 'utf8'); } catch { continue; }
-    events.push(...parseSessionLines(content.split('\n'), floor));
+    events.push(...parser(content.split('\n'), floor));
   }
   return events;
+}
+
+// 권위 토큰 소스: Claude Code(~/.claude/projects) + Codex(~/.codex/sessions) 세션 로그.
+// 두 소스의 ts는 모두 ISO(Date.parse)라 lastSessionTs 커서·일일 상한을 그대로 공유한다.
+function readSessionEvents(sinceTs) {
+  const floor = sinceTs > 0 ? sinceTs : Date.now() - FIRST_RUN_SESSION_WINDOW_MS;
+  return [
+    ...scanSessionRoot(join(homedir(), '.claude', 'projects'), floor, parseSessionLines),
+    ...scanSessionRoot(join(homedir(), '.codex', 'sessions'), floor, parseCodexLines),
+  ];
 }
 
 // ---- 창 드리프트: busy(달리기)면 크게, idle이면 가끔 조금 이동, 화면 경계에서 반전 ----
@@ -274,26 +283,29 @@ function criesDirPath() { return join(dataDir(), 'cries'); }
 function movesDirPath() { return join(dataDir(), 'moves'); }
 
 // 종 키 → 그 타입의 오리지널 이펙트 변형(실제 기술 4개에 번갈아 매핑).
-const MOVE_EFFECTS = {
-  grass: ['leaf', 'leaf_swirl'],
-  fire: ['fire', 'fire_breath'],
-  water: ['water', 'water_bubbles'],
-  electric: ['electric', 'electric_bolts'],
+// 원소별 이펙트 풀 — 그 풀의 모든 연출은 "그 원소로 읽혀야" 한다.
+// (불 기술에 레이저가 튀어나오는 불일치 방지: 불 풀엔 빔 없음, 전부 불꽃/폭발)
+const EFFECT_POOLS = {
+  grass: ['leaf', 'leaf_swirl', 'grass_impact'],
+  fire: ['fire_breath', 'fire', 'fire_impact'],       // 불기둥 / 불꽃띠 / 불꽃폭발 — 전부 불
+  water: ['water', 'water_bubbles', 'water_beam'],    // 물줄기 / 거품 / 물대포(파랑이라 물로 읽힘)
+  electric: ['electric', 'electric_bolts', 'electric_beam'],
 };
 const prettify = (slug) => slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
 // 기술마다 서로 다른 오리지널 이펙트를 배정(이름 해시 기반, 결정적). 게임 애니 복제 아님.
 // - 이름 뜻이 뚜렷하면 전용 연출(불대문자 → 大 불꽃)
-// - 그 외엔 [타입 앰비언트 / 빔 / 임팩트] 중 이름 해시로 하나 선택 → 기술마다 달라 보임
+// - 그 외엔 그 원소 풀에서 이름 해시로 하나 선택 → 기술마다 달라 보이되 원소는 항상 일치
 function effectForMove(species, slug, koName) {
-  if (slug === 'fire-blast' || (koName && koName.includes('대문자'))) return 'fire_kanji';
+  // 뜻이 뚜렷한 대표 기술은 전용 연출로 이펙트=기술을 일치시킨다.
+  if (species === 'fire') {
+    if (slug === 'fire-blast' || (koName && koName.includes('대문자'))) return 'fire_kanji';   // 불대문자 → 大
+    if (slug === 'flamethrower' || (koName && koName.includes('화염방사'))) return 'fire_breath'; // 화염방사 → 직선 화염 불기둥
+  }
   let h = 0;
   for (const ch of slug) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  const pick3 = h % 3;
-  if (pick3 === 1) return `${species}_beam`;
-  if (pick3 === 2) return `${species}_impact`;
-  const variants = MOVE_EFFECTS[species] || ['leaf'];
-  return variants[h % variants.length]; // 타입 앰비언트(기존 연출)
+  const pool = EFFECT_POOLS[species] || ['leaf'];
+  return pool[h % pool.length];
 }
 
 // 그 종이 배우는 "타입 일치" 기술 4개의 실제 이름을 공개 PokéAPI에서 런타임 조회해

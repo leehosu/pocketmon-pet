@@ -23,6 +23,46 @@
   const family = effect.split('_')[0];
   const colors = COL[family] || COL.leaf;
 
+  // 부드러운 방사형 글로우 스프라이트를 한 번만 만들어 두고(성능) additive로 겹쳐 불꽃을 그린다.
+  // 매 프레임 createRadialGradient를 호출하지 않아 각진 벡터가 아닌 진짜 불처럼 부드럽게 빛난다.
+  function makeGlow(size, r, g, b) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const x = c.getContext('2d'); const h = size / 2;
+    const grd = x.createRadialGradient(h, h, 0, h, h, h);
+    grd.addColorStop(0, `rgba(${r},${g},${b},1)`);
+    grd.addColorStop(0.4, `rgba(${r},${g},${b},0.55)`);
+    grd.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    x.fillStyle = grd; x.fillRect(0, 0, size, size);
+    return c;
+  }
+  const GLOW = {
+    fire: [makeGlow(128, 255, 236, 140), makeGlow(128, 240, 140, 40), makeGlow(128, 209, 59, 39)],
+  };
+  // 하단(ox,oy)에서 위로 타오르는 부드러운 불기둥. 글로우 스프라이트를 세로로 쌓아 난류로 흔든다.
+  function flameColumn(a, ox, oy, height, width, t, seed) {
+    const [gY, gO, gR] = GLOW.fire;
+    ctx.globalCompositeOperation = 'lighter';
+    const N = 26;
+    for (let i = 0; i < N; i++) {
+      const f = i / N;                                   // 0(밑동)~1(끝)
+      const sway = Math.sin(t * 6 + seed + f * 6) * width * 0.5 * f + Math.sin(t * 11 + seed * 2 + f * 10) * width * 0.18;
+      const x = ox + sway;
+      const y = oy - f * height - Math.sin(t * 9 + seed) * 4;
+      const wob = 0.85 + 0.3 * Math.sin(t * 14 + i + seed);
+      const s = width * (1.15 - f * 0.85) * wob;         // 밑동 큼→끝 작음
+      const img = f < 0.33 ? gY : (f < 0.7 ? gO : gR);   // 밑/속 노랑→중간 주황→끝 빨강
+      ctx.globalAlpha = a * (1 - f * 0.7) * 0.9;
+      ctx.drawImage(img, x - s / 2, y - s / 2, s, s);
+    }
+    for (let i = 0; i < 14; i++) {                       // 속불 밝은 코어
+      const f = i / 14; const x = ox + Math.sin(t * 7 + seed + f * 5) * width * 0.18 * f;
+      const y = oy - f * height * 0.72; const s = width * 0.5 * (1 - f * 0.8);
+      ctx.globalAlpha = a * (1 - f) * 0.9; ctx.drawImage(gY, x - s / 2, y - s / 2, s, s);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
   let parts = [];
   let bolts = [];
   let lastBolt = -1;
@@ -115,8 +155,8 @@
       // 빔 끝 스파크
       for (let i = 0; i < 40; i++) parts.push({ off: rand(0, 1), y: rand(-8, 8), size: rand(1.5, 4), c: pick(colors) });
     } else if (effect.endsWith('_impact')) {
-      // 임팩트 파편(사방으로)
-      for (let i = 0; i < 55; i++) parts.push({ ang: rand(0, TAU), speed: rand(160, 520), size: rand(2, 6), c: pick(colors), delay: rand(0, 0.08) });
+      // 임팩트 파편(사방으로) — 길쭉한 불꽃잎, 길이/거리 지터로 폭발감
+      for (let i = 0; i < 55; i++) parts.push({ ang: rand(0, TAU), speed: rand(160, 520), size: rand(2.5, 6), c: pick(colors), delay: rand(0, 0.08), lenf: rand(0.55, 1.5) });
     }
     // electric_bolts는 프레임 루프에서 동적으로 큰 볼트 + 화면 번쩍 생성
   }
@@ -279,29 +319,34 @@
       }
       ctx.globalCompositeOperation = 'source-over';
     } else if (effect.endsWith('_impact')) {
-      // 임팩트: 중심 플래시 + 확장 충격파 링 + 사방 파편(타입 색). 오리지널.
+      // 임팩트: 중심 섬광 + 확장 충격파 링 + 방사형 길쭉한 불꽃잎(타입 색). 오리지널.
       const cx = W / 2, cy = H / 2;
       ctx.globalCompositeOperation = 'lighter';
-      if (nowT < 0.22) {
-        ctx.globalAlpha = alpha * (1 - nowT / 0.22);
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath(); ctx.arc(cx, cy, 60 * (1 - nowT / 0.22) + 20, 0, TAU); ctx.fill();
+      // 중심 섬광(흰→타입색으로 페이드)
+      if (nowT < 0.5) {
+        const fr = Math.max(0, 1 - nowT / 0.5);
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 150);
+        g.addColorStop(0, `rgba(255,255,255,${alpha * 0.9 * fr})`);
+        g.addColorStop(0.4, `rgba(248,200,56,${alpha * 0.5 * fr})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.globalAlpha = 1; ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(cx, cy, 150, 0, TAU); ctx.fill();
       }
-      for (let r = 0; r < 3; r++) {
-        const age = nowT - r * 0.11;
-        if (age < 0) continue;
-        ctx.globalAlpha = alpha * Math.max(0, 0.7 - age * 0.9);
-        ctx.strokeStyle = colors[0]; ctx.lineWidth = 9;
-        ctx.beginPath(); ctx.arc(cx, cy, age * 620, 0, TAU); ctx.stroke();
-      }
+      // 얇은 충격파 링 1개(빠르게 확산하며 사라짐)
+      ctx.globalAlpha = alpha * Math.max(0, 0.6 - nowT * 1.1);
+      ctx.strokeStyle = colors[0]; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(cx, cy, nowT * 760, 0, TAU); ctx.stroke();
+      // 방사형 길쭉한 불꽃잎 — ang 방향으로 늘여 그려 폭발 파편처럼
       for (const p of parts) {
         const age = nowT - p.delay;
         if (age < 0) continue;
-        const d = p.speed * age;
-        const x = cx + Math.cos(p.ang) * d, y = cy + Math.sin(p.ang) * d + 220 * age * age;
-        ctx.globalAlpha = alpha * Math.max(0, 1 - age);
+        const d = p.speed * age * p.lenf;
+        const x = cx + Math.cos(p.ang) * d, y = cy + Math.sin(p.ang) * d;
+        ctx.save(); ctx.translate(x, y); ctx.rotate(p.ang + Math.PI / 2);
+        ctx.globalAlpha = alpha * Math.max(0, 1 - age * 1.6);
         ctx.fillStyle = p.c;
-        ctx.beginPath(); ctx.arc(x, y, p.size, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0, 0, p.size, p.size * 3.2 * p.lenf, 0, 0, TAU); ctx.fill();
+        ctx.restore();
       }
       ctx.globalCompositeOperation = 'source-over';
     } else if (effect === 'leaf') {
@@ -321,65 +366,27 @@
       }
     } else if (effect === 'fire') {
       // 바닥 열기 글로우
-      const gg = ctx.createRadialGradient(W / 2, H, 0, W / 2, H, H * 0.85);
-      gg.addColorStop(0, `rgba(224,138,30,${alpha * 0.45})`);
-      gg.addColorStop(1, 'rgba(224,138,30,0)');
+      const gg = ctx.createRadialGradient(W / 2, H, 0, W / 2, H, H * 0.9);
+      gg.addColorStop(0, `rgba(240,140,40,${alpha * 0.4})`);
+      gg.addColorStop(1, 'rgba(240,140,40,0)');
       ctx.globalAlpha = 1; ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H);
-
-      // 바닥 화염 띠: 겉불(빨강)→중간(주황)→속불(노랑) 3겹, additive로 겹쳐 화염 느낌
-      ctx.globalCompositeOperation = 'lighter';
-      const layers = [
-        { col: '#d13b27', baseW: 80, hf: 0.46, step: 36 },
-        { col: '#e08a1e', baseW: 56, hf: 0.34, step: 30 },
-        { col: '#f8c838', baseW: 34, hf: 0.22, step: 24 },
-      ];
-      for (const L of layers) {
-        ctx.fillStyle = L.col;
-        for (let x = -L.step; x <= W + L.step; x += L.step) {
-          const fl = 0.5 + 0.3 * Math.sin(nowT * 11 + x * 0.05) + 0.2 * Math.sin(nowT * 19 + x * 0.13);
-          const h = H * L.hf * Math.max(0.4, fl);
-          const w = L.baseW * (0.85 + 0.15 * Math.sin(nowT * 5 + x));
-          const cxx = x + 6 * Math.sin(nowT * 7 + x); // 좌우로 살랑
-          ctx.globalAlpha = alpha * 0.5;
-          ctx.beginPath();
-          ctx.moveTo(cxx - w / 2, H);
-          ctx.quadraticCurveTo(cxx - w * 0.28, H - h * 0.55, cxx, H - h);
-          ctx.quadraticCurveTo(cxx + w * 0.28, H - h * 0.55, cxx + w / 2, H);
-          ctx.closePath();
-          ctx.fill();
-        }
+      // 화면 폭을 가득 메우는 부드러운 불꽃 띠(여러 기둥이 이글이글)
+      const n = Math.max(9, Math.round(W / 90));
+      for (let k = 0; k < n; k++) {
+        const ox = (k + 0.5) * W / n;
+        flameColumn(alpha, ox, H, H * 0.5 * (0.7 + 0.3 * Math.sin(nowT * 5 + k)), Math.max(30, W / n * 0.5), nowT, k * 1.7);
       }
-      // 위로 타오르는 불티 — 높이 오를수록 노랑→주황→빨강으로 식으며 사라짐
-      for (const p of parts) {
-        const age = nowT - p.delay;
-        if (age < 0 || age > p.life) continue;
-        const f = age / p.life;
-        const y = H - f * p.vy * p.life * 3.2;
-        const x = p.x + Math.sin(age * 6 + p.x) * p.drift * f;
-        ctx.globalAlpha = alpha * (1 - f) * 0.9;
-        ctx.fillStyle = f < 0.35 ? '#f8c838' : (f < 0.7 ? '#e08a1e' : '#d13b27');
-        ctx.beginPath();
-        ctx.arc(x, y, p.size * (1 - f * 0.7), 0, TAU);
-        ctx.fill();
-      }
-      ctx.globalCompositeOperation = 'source-over';
     } else if (effect === 'fire_breath') {
-      const ox = W / 2, oy = H + 10;
-      ctx.globalCompositeOperation = 'lighter'; // 겹치면 밝아지는 화염 느낌
-      for (const p of parts) {
-        const age = nowT - p.delay;
-        if (age < 0 || age > p.life) continue;
-        const f = age / p.life;
-        const d = p.speed * age;
-        const x = ox + Math.cos(p.ang) * d;
-        const y = oy - Math.sin(p.ang) * d;
-        ctx.globalAlpha = alpha * (1 - f) * 0.9;
-        ctx.fillStyle = f < 0.35 ? '#f8c838' : (f < 0.7 ? '#e08a1e' : '#d13b27'); // 뻗을수록 식음
-        ctx.beginPath();
-        ctx.arc(x, y, p.size * (1 - f * 0.5), 0, TAU);
-        ctx.fill();
-      }
-      ctx.globalCompositeOperation = 'source-over';
+      // 하단 중앙에서 위로 활활 타오르는 큰 부드러운 불기둥 + 좌우 보조 불꽃. 오리지널.
+      const ox = W / 2, oy = H + 6;
+      const gg = ctx.createRadialGradient(ox, oy, 0, ox, oy, H);
+      gg.addColorStop(0, `rgba(240,140,40,${alpha * 0.45})`);
+      gg.addColorStop(1, 'rgba(240,140,40,0)');
+      ctx.globalAlpha = 1; ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H);
+      const scale = W / 560;
+      for (const dx of [-140, 140]) flameColumn(alpha * 0.85, ox + dx * scale, oy, H * 0.55, 70 * scale, nowT, dx);
+      for (const dx of [-70, 70]) flameColumn(alpha * 0.9, ox + dx * scale, oy, H * 0.75, 90 * scale, nowT, dx * 3);
+      flameColumn(alpha, ox, oy, H * 0.95, 150 * scale, nowT, 0);
     } else if (effect === 'fire_kanji') {
       // 큰 대(大) 글자를 불로 — 획이 차례로 타오르며 그려진다. (大는 공용 한자, 애니는 오리지널)
       const cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.58;
