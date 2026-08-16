@@ -71,6 +71,12 @@
         x: rand(0, W), y: rand(0, H), size: rand(2, 6),
         on: rand(0, 1), blink: rand(6, 16), phase: rand(0, TAU), c: pick(colors),
       });
+    } else if (effect === 'hatch') {
+      // 부화: 중앙에서 바깥으로 튀는 별 반짝이 (오리지널 연출)
+      for (let i = 0; i < 60; i++) parts.push({
+        ang: rand(0, TAU), speed: rand(120, 460), size: rand(3, 9),
+        c: pick(['#ffffff', '#f8c838', '#fff27a']), spin: rand(-6, 6), delay: rand(0, 0.45),
+      });
     }
     // electric_bolts는 프레임 루프에서 동적으로 큰 볼트 + 화면 번쩍 생성
   }
@@ -235,6 +241,67 @@
       drawBolts(alpha); // 작은 볼트도 간간이
     } else if (effect === 'electric_bolts') {
       drawBolts(alpha);
+    } else if (effect === 'hatch') {
+      const cx = W / 2, cy = H / 2;
+      // 1) 알 + 균열 (0~0.6s)
+      if (nowT < 0.6) {
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#fff8e0';
+        ctx.strokeStyle = '#1a1400';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, 30, 40, 0, 0, TAU);
+        ctx.fill();
+        ctx.stroke();
+        const cp = Math.min(1, nowT / 0.6); // 균열 진행
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let zx = cx - 24, zy = cy - 12;
+        ctx.moveTo(zx, zy);
+        for (let i = 0; i < Math.floor(7 * cp); i++) { zx += 8; zy += (i % 2 ? 9 : -9); ctx.lineTo(zx, zy); }
+        ctx.stroke();
+      }
+      // 2) 빛 폭발 (0.45~1.3s): 방사 그라디언트 + 광선
+      if (nowT > 0.45 && nowT < 1.3) {
+        const bp = (nowT - 0.45) / 0.85;
+        const r = Math.max(1, bp * Math.max(W, H) * 0.75);
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        g.addColorStop(0, `rgba(255,255,255,${alpha * (1 - bp)})`);
+        g.addColorStop(0.5, `rgba(248,200,56,${alpha * (1 - bp) * 0.6})`);
+        g.addColorStop(1, 'rgba(248,200,56,0)');
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = `rgba(255,242,122,${alpha * (1 - bp)})`;
+        ctx.lineWidth = 3;
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * TAU + nowT * 1.5;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+          ctx.stroke();
+        }
+      }
+      // 3) 별 반짝이 (0.6s~): 중앙에서 바깥으로 + 약한 중력
+      for (const p of parts) {
+        const age = nowT - 0.6 - p.delay;
+        if (age < 0) continue;
+        const d = p.speed * age;
+        const x = cx + Math.cos(p.ang) * d;
+        const y = cy + Math.sin(p.ang) * d + 60 * age * age;
+        ctx.save();
+        ctx.globalAlpha = alpha * Math.max(0, 1 - age / 1.6);
+        ctx.translate(x, y);
+        ctx.rotate(age * p.spin);
+        ctx.fillStyle = p.c;
+        const s = p.size;
+        ctx.beginPath();
+        ctx.moveTo(0, -s); ctx.lineTo(s * 0.3, -s * 0.3); ctx.lineTo(s, 0); ctx.lineTo(s * 0.3, s * 0.3);
+        ctx.lineTo(0, s); ctx.lineTo(-s * 0.3, s * 0.3); ctx.lineTo(-s, 0); ctx.lineTo(-s * 0.3, -s * 0.3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
     }
 
     if (elapsed < DURATION) requestAnimationFrame(frame);
