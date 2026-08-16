@@ -32,6 +32,7 @@ const EFFECT_TYPES = [
   'electric', 'electric_bolts',
   'hatch',  // 부화 연출(화면 전체)
   'evolve', // 진화 연출(화면 전체)
+  'fire_kanji', // 불대문자: 큰 대(大) 글자를 불로 (公용 한자 + 오리지널 애니)
 ];
 const DRIFT_STEP_BUSY = 6; // 프롬프트 처리중(달리기) — 크게 움직임
 const DRIFT_STEP_IDLE = 1; // 평상시 — 가끔 조금만 움직임
@@ -306,7 +307,10 @@ async function fetchMoves(species, stage) {
         const ko = (mv.names || []).find((n) => n.language && n.language.name === 'ko');
         if (ko && ko.name) label = ko.name;
       } catch { /* 이름 로컬라이즈 실패 → 영문 프리티 */ }
-      out.push({ name: label, effect: variants[i % variants.length] });
+      // 이름이 "큰 대(大) 글자"를 뜻하는 기술(불대문자/fire-blast)은 大를 불로 그리는 전용 이펙트.
+      let eff = variants[i % variants.length];
+      if (typeMoves[i] === 'fire-blast' || label.includes('대문자')) eff = 'fire_kanji';
+      out.push({ name: label, effect: eff });
     }
     if (out.length) {
       mkdirSync(movesDirPath(), { recursive: true });

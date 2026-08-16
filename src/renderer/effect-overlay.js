@@ -98,6 +98,12 @@
         ang: rand(0, TAU), speed: rand(120, 460), size: rand(3, 9),
         c: pick(['#ffffff', '#f8c838', '#fff27a']), spin: rand(-6, 6), delay: rand(0, 0.45),
       });
+    } else if (effect === 'fire_kanji') {
+      // 大 획 위로 타오를 불티
+      for (let i = 0; i < 90; i++) parts.push({
+        x: rand(0, W), delay: rand(0, 1.6), life: rand(0.6, 1.3),
+        vy: rand(60, 150), drift: rand(-30, 30), size: rand(3, 8), c: pick(COL.fire),
+      });
     } else if (effect === 'evolve') {
       // 진화: 바깥에서 중앙으로 모여드는 에너지(수렴) + 이후 폭발용 별
       for (let i = 0; i < 70; i++) parts.push({
@@ -310,6 +316,43 @@
         ctx.beginPath();
         ctx.arc(x, y, p.size * (1 - f * 0.5), 0, TAU);
         ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (effect === 'fire_kanji') {
+      // 큰 대(大) 글자를 불로 — 획이 차례로 타오르며 그려진다. (大는 공용 한자, 애니는 오리지널)
+      const cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.52;
+      // 大 3획: 가로(一) → 왼쪽 삐침(丿) → 오른쪽 파임(乀)
+      const strokes = [
+        [[-0.5, -0.26], [0.5, -0.26]],
+        [[0.06, -0.46], [-0.5, 0.5]],
+        [[-0.06, -0.08], [0.5, 0.5]],
+      ];
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.lineCap = 'round';
+      for (let si = 0; si < strokes.length; si++) {
+        const p = Math.min(1, Math.max(0, (nowT - si * 0.22) / 0.35)); // 획 순차 등장
+        if (p <= 0) continue;
+        const [a, b] = strokes[si];
+        const ax = cx + a[0] * S, ay = cy + a[1] * S;
+        const ex = ax + (b[0] * S - a[0] * S) * p, ey = ay + (b[1] * S - a[1] * S) * p;
+        const flick = 0.85 + 0.15 * Math.sin(nowT * 20 + si);
+        ctx.shadowColor = '#ff6a3d'; ctx.shadowBlur = 20;
+        for (const [w, col] of [[28 * flick, '#d13b27'], [17 * flick, '#e08a1e'], [8 * flick, '#f8c838']]) {
+          ctx.globalAlpha = alpha * 0.5; ctx.strokeStyle = col; ctx.lineWidth = w;
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke();
+        }
+      }
+      ctx.shadowBlur = 0;
+      // 획을 타고 오르는 불티
+      for (const pt of parts) {
+        const age = nowT - pt.delay;
+        if (age < 0 || age > pt.life) continue;
+        const f = age / pt.life;
+        const y = H - f * pt.vy * pt.life * 3.2;
+        const x = pt.x + Math.sin(age * 6 + pt.x) * pt.drift * f;
+        ctx.globalAlpha = alpha * (1 - f) * 0.8;
+        ctx.fillStyle = f < 0.4 ? '#f8c838' : '#e08a1e';
+        ctx.beginPath(); ctx.arc(x, y, pt.size * (1 - f * 0.6), 0, TAU); ctx.fill();
       }
       ctx.globalCompositeOperation = 'source-over';
     } else if (effect === 'water') {
