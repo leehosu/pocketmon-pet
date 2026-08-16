@@ -1,9 +1,11 @@
 <!doctype html>
 <html>
 <head><meta charset="utf-8"><style>
-  html,body{margin:0;background:transparent;overflow:hidden;-webkit-app-region:drag;}
+  html,body{margin:0;background:transparent;overflow:hidden;}
   body{width:96px;height:96px;position:relative;}
-  canvas{image-rendering:pixelated;position:absolute;top:0;left:0;}
+  /* 네이티브 -webkit-app-region:drag에 기대지 않고 pet-window.js에서 수동 드래그로
+     창을 옮긴다(그래야 캔버스 클릭=핀 토글이 드래그 히트테스트에 먹히지 않는다). */
+  canvas{image-rendering:pixelated;position:absolute;top:0;left:0;-webkit-app-region:no-drag;cursor:grab;}
   #pop{
     position:absolute;top:2px;left:0;width:96px;text-align:center;
     font:bold 11px monospace;color:#fff;text-shadow:0 0 2px #000,0 0 2px #000;

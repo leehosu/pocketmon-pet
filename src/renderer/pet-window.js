@@ -129,7 +129,44 @@ if (typeof window !== 'undefined') {
 
   canvas.addEventListener('mouseenter', () => { hovering = true; updateHud(); });
   canvas.addEventListener('mouseleave', () => { hovering = false; updateHud(); });
-  canvas.addEventListener('click', () => { pinned = !pinned; updateHud(); });
+
+  // 수동 드래그 + 클릭 구분: mousedown~mouseup 사이 이동량이 임계값 미만이면 클릭(핀 토글),
+  // 이상이면 드래그로 간주해 창을 옮긴다(pkmn.moveWindowBy). 네이티브 drag region 미사용.
+  const CLICK_THRESHOLD_PX = 4;
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+  let movedTotal = 0;
+
+  canvas.addEventListener('mousedown', (e) => {
+    dragging = true;
+    lastX = e.screenX;
+    lastY = e.screenY;
+    movedTotal = 0;
+    canvas.style.cursor = 'grabbing';
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dx = e.screenX - lastX;
+    const dy = e.screenY - lastY;
+    lastX = e.screenX;
+    lastY = e.screenY;
+    movedTotal += Math.abs(dx) + Math.abs(dy);
+    if (window.pkmn && typeof window.pkmn.moveWindowBy === 'function') {
+      window.pkmn.moveWindowBy(dx, dy);
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    canvas.style.cursor = 'grab';
+    if (movedTotal < CLICK_THRESHOLD_PX) {
+      pinned = !pinned; // 이동이 거의 없었다 → 클릭으로 간주해 핀 토글
+      updateHud();
+    }
+  });
 
   if (window.pkmn && typeof window.pkmn.onState === 'function') {
     window.pkmn.onState(applyState);

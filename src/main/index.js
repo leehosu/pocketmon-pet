@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, screen, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, screen, nativeImage, ipcMain } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
@@ -30,11 +30,16 @@ const TRAY_ICON_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAS0lEQVR4nGNgoDYQERH5jw8TrfmZjQ0KJmgILo24' +
   'DCJLM05DCPmbYHhQxYCvX7+ShAehAaQYgjMQyTaAFEOISo3YDCIrP5CcmcgBACPIn+yKwOQDAAAAAElFTkSuQmCC';
 
+// 수동 드래그와 자동 드리프트가 창을 동시에 잡아당겨 싸우지 않도록,
+// 마지막 수동 이동 후 이 시간 동안은 auto-drift를 건너뛴다.
+const MANUAL_MOVE_COOLDOWN_MS = 1500;
+
 let mainWindow = null;
 let tray = null;
 let intervalId = null;
 let driftDir = 1;
 let state = null;
+let lastManualMoveAt = 0;
 
 // ---- readEvents(): hook이 append하는 서명된 events.jsonl을 증분 읽기 + 검증 ----
 // 서명(sig)이 없거나 위조된 이벤트는 조용히 버린다(치팅 방지) — 앱이 XP의 유일한 권위.
@@ -128,6 +133,8 @@ function readSessionEvents(sinceTs) {
 // ---- 창 드리프트: busy(달리기)면 크게, idle이면 가끔 조금 이동, 화면 경계에서 반전 ----
 function driftWindow(activity) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  // 사용자가 방금 수동으로 창을 옮겼다면 잠깐 자동 이동을 멈춘다(충돌 방지).
+  if (Date.now() - lastManualMoveAt < MANUAL_MOVE_COOLDOWN_MS) return;
   let step = 0;
   if (activity.busy) step = DRIFT_STEP_BUSY;
   else if (Math.random() < IDLE_MOVE_CHANCE) step = DRIFT_STEP_IDLE;
@@ -224,6 +231,15 @@ app.whenReady().then(() => {
   state = ensureStarter(loadState(dir), Math.random);
   state = { ...state, busy: false }; // 재시작 잔여 busy 무시
   saveState(dir, state);
+
+  // 렌더러의 수동 드래그 → 창 이동. 네이티브 -webkit-app-region:drag 대신 이 경로를 쓴다
+  // (그래야 캔버스 클릭=핀 토글이 드래그 히트테스트에 먹히지 않는다).
+  ipcMain.on('pkmn:move-window', (_e, { dx, dy }) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const [x, y] = mainWindow.getPosition();
+    mainWindow.setPosition(Math.round(x + dx), Math.round(y + dy));
+    lastManualMoveAt = Date.now();
+  });
 
   createWindow();
   createTray();
