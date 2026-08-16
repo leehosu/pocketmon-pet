@@ -12,6 +12,7 @@ import { verify } from '../core/integrity.js';
 import { loadState, saveState } from '../core/store.js';
 import { parseSessionLines } from '../core/session-parser.js';
 import { tick, ensureStarter } from './orchestrator.js';
+import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -156,12 +157,60 @@ function driftWindow(activity) {
   mainWindow.setBounds({ x: nextX, y: nextY, width: bounds.width, height: bounds.height });
 }
 
+// ---- 커스텀 스프라이트: ~/.pocketmon/sprites/ 의 사용자 PNG → data URL 맵 ----
+// 폴더 전체를 매 tick 재전송하면 대용량 IPC가 되므로, 파일목록+mtime+size로
+// 만든 시그니처가 바뀔 때만(=최초 1회 포함) 재로드해 payload에 싣는다.
+let customSpritesSignature = null;
+
+function spritesDirPath() { return join(dataDir(), SPRITE_DIR); }
+
+function computeSpritesSignature(dir) {
+  let entries;
+  try { entries = readdirSync(dir); } catch { return ''; }
+  const parts = [];
+  for (const name of [...entries].sort()) {
+    try {
+      const st = statSync(join(dir, name));
+      parts.push(`${name}:${st.mtimeMs}:${st.size}`);
+    } catch { /* 스캔 중 사라진 파일 — 스킵 */ }
+  }
+  return parts.join('|');
+}
+
+function loadCustomSprites(dir) {
+  let entries;
+  try { entries = readdirSync(dir); } catch { return {}; }
+  const map = {};
+  for (const name of entries) {
+    const parsed = parseSpriteFileName(name);
+    if (!parsed) continue; // 파일명 규칙 안 맞으면 무시(디렉토리/기타 파일 포함)
+    try {
+      const buf = readFileSync(join(dir, name));
+      map[parsed.key] = `data:image/png;base64,${buf.toString('base64')}`;
+    } catch {
+      // 개별 파일 읽기 실패는 스킵 — 앱 크래시 금지
+    }
+  }
+  return map;
+}
+
+// 폴더가 최초 스캔이거나 변경됐을 때만 새 맵을 반환, 아니면 null(재전송 생략).
+function refreshCustomSpritesIfChanged() {
+  const dir = spritesDirPath();
+  const sig = computeSpritesSignature(dir);
+  if (sig === customSpritesSignature) return null; // 변경 없음 — 재전송 생략
+  customSpritesSignature = sig;
+  return loadCustomSprites(dir);
+}
+
 function runTick() {
   const today = new Date().toISOString().slice(0, 10);
   const result = tick({ state, readEvents, readSessionEvents, today });
   state = result.state;
   saveState(dataDir(), state);
   driftWindow(result.activity);
+  const customSprites = refreshCustomSpritesIfChanged();
+  if (customSprites) result.customSprites = customSprites; // 최초 1회 + 변경 시에만 포함
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('state', result);
   }
