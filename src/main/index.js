@@ -293,8 +293,9 @@ async function fetchMoves(species, stage) {
     ]);
     const learnable = new Set((pk.moves || []).map((m) => m.move.name));
     const all = (ty.moves || []).map((m) => m.name).filter((n) => learnable.has(n));
-    // 단계별로 목록의 다른 구간에서 2개 선택 → 진화할 때마다 기술이 바뀌도록.
-    const start = Math.max(0, Math.min(stage, all.length - 2));
+    // 단계별로 목록의 서로 다른 구간에서 2개 선택 → 진화할 때마다 기술이 확실히 바뀌도록
+    // (간격을 2로 벌려 1·2·3단계가 겹치지 않게. 목록이 짧으면 끝쪽으로 clamp.)
+    const start = Math.max(0, Math.min(stage * 2, all.length - 2));
     const typeMoves = all.slice(start, start + 2);
     const variants = MOVE_EFFECTS[species] || ['leaf'];
     const out = [];
