@@ -52,6 +52,16 @@ describe('store', () => {
     expect(loaded.stage).toBe(1); // 피카츄 (전기 진화 10)
   });
 
+  it('resets when save file is a legacy/unwrapped shape (no data/sig) — anti-cheat', () => {
+    // 공격자/구버전이 서명 래퍼 없이 raw 상태를 써넣음
+    writeFileSync(join(dir, 'save.json'), JSON.stringify({ xp: 999999, species: 'fire', locked: true }));
+    const loaded = loadState(dir);
+    expect(loaded.xp).toBe(0);        // 무시하고 초기화
+    expect(loaded.locked).toBe(false);
+    expect(loaded.species).toBe(null);
+    expect(existsSync(join(dir, 'save.json.bak'))).toBe(true); // 손상본 백업
+  });
+
   it('rolls a starter once and locks it', () => {
     const s1 = rollStarter(defaultState(), () => 0);
     expect(s1.locked).toBe(true);
