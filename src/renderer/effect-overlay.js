@@ -218,6 +218,7 @@
   const isSkill = !['hatch', 'evolve'].includes(effect);
   // juice: 임팩트 순간 화면 흔들림 세기(px)
   function shakeFor() {
+    if (effect === 'fire_kanji') return 0; // 大 획이 흔들려 휘어 보이지 않게 흔들림 제외
     if (effect === 'hatch') return (nowT > 0.45 && nowT < 1.0) ? 4 : 0;
     if (effect === 'evolve') return (nowT > 1.25 && nowT < 1.6) ? 6 : 0;
     const strong = effect.endsWith('_bolts') || effect.endsWith('_breath') ? 1.9 : 1;
@@ -388,19 +389,28 @@
         [[0.10, -0.5], [-0.48, 0.52]],   // 丿
         [[-0.06, -0.22], [0.48, 0.52]],  // 乀
       ];
+      // 각 획을 곧은 직선 위에 얹은 "이글이글 타오르는 불꽃 덩어리"로 그린다.
+      // 중심은 직선(휘지 않음), 덩어리 크기만 시간+위치로 flicker → 불이 살아있게.
       ctx.globalCompositeOperation = 'lighter';
-      ctx.lineCap = 'round';
+      ctx.shadowColor = '#ff6a3d'; ctx.shadowBlur = 16;
       for (let si = 0; si < strokes.length; si++) {
         const p = Math.min(1, Math.max(0, (nowT - si * 0.22) / 0.35)); // 획 순차 등장
         if (p <= 0) continue;
         const [a, b] = strokes[si];
         const ax = cx + a[0] * S, ay = cy + a[1] * S;
-        const ex = ax + (b[0] * S - a[0] * S) * p, ey = ay + (b[1] * S - a[1] * S) * p;
-        const flick = 0.85 + 0.15 * Math.sin(nowT * 20 + si);
-        ctx.shadowColor = '#ff6a3d'; ctx.shadowBlur = 20;
-        for (const [w, col] of [[42 * flick, '#d13b27'], [26 * flick, '#e08a1e'], [12 * flick, '#f8c838']]) {
-          ctx.globalAlpha = alpha * 0.5; ctx.strokeStyle = col; ctx.lineWidth = w;
-          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke();
+        const ex = ax + (b[0] * S - a[0] * S) * p;
+        const ey = ay + (b[1] * S - a[1] * S) * p;
+        const len = Math.hypot(ex - ax, ey - ay);
+        const n = Math.max(2, Math.floor(len / 9));
+        for (let k = 0; k <= n; k++) {
+          const t = k / n;
+          const x = ax + (ex - ax) * t, y = ay + (ey - ay) * t;
+          const fl = 0.6 + 0.3 * Math.sin(nowT * 15 + k * 0.7 + si * 2) + 0.2 * Math.sin(nowT * 29 + k);
+          const base = 24 * Math.max(0.4, fl);
+          ctx.globalAlpha = alpha * 0.5;
+          ctx.fillStyle = '#d13b27'; ctx.beginPath(); ctx.arc(x, y, base, 0, TAU); ctx.fill();
+          ctx.fillStyle = '#e08a1e'; ctx.beginPath(); ctx.arc(x, y, base * 0.6, 0, TAU); ctx.fill();
+          ctx.fillStyle = '#f8c838'; ctx.beginPath(); ctx.arc(x, y, base * 0.3, 0, TAU); ctx.fill();
         }
       }
       ctx.shadowBlur = 0;
