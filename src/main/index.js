@@ -181,7 +181,7 @@ let customSpritesSignature = null;
 
 // 기술 이펙트: 현재 디스플레이 전체를 덮는 투명·클릭통과 오버레이 창을 만들어
 // 타입별 파티클 애니(effect-overlay)를 재생하고 EFFECT_DURATION_MS 후 자동 종료.
-function playSkillEffect(effect) {
+function playSkillEffect(effect, opts) {
   if (!EFFECT_TYPES.includes(effect)) return;
   // 이전 이펙트가 남아 있으면 먼저 정리(중첩 방지).
   if (effectWin && !effectWin.isDestroyed()) { effectWin.close(); }
@@ -203,7 +203,7 @@ function playSkillEffect(effect) {
   win.setIgnoreMouseEvents(true, { forward: true }); // 클릭이 데스크톱으로 통과
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.loadFile(join(__dirname, '../renderer/effect-overlay.html'), { query: { effect } });
+  win.loadFile(join(__dirname, '../renderer/effect-overlay.html'), { query: { effect, ...(opts || {}) } });
 
   setTimeout(() => {
     if (win && !win.isDestroyed()) win.close();
@@ -212,6 +212,15 @@ function playSkillEffect(effect) {
 }
 
 function spritesDirPath() { return join(dataDir(), SPRITE_DIR); }
+
+// 스프라이트 PNG를 data URL로 읽음(없으면 null). 진화 연출에 이전/다음 폼 이미지를 넘길 때 사용.
+function spriteDataUrl(species, stage) {
+  try {
+    const p = join(spritesDirPath(), `${species}_${stage}.png`);
+    if (!existsSync(p)) return null;
+    return 'data:image/png;base64,' + readFileSync(p).toString('base64');
+  } catch { return null; }
+}
 
 // 공개 URL을 파일로 다운로드(리다이렉트 추적, tmp→rename). 실패는 콜백으로 전달.
 function downloadTo(url, dest, cb, redirects) {
@@ -423,10 +432,17 @@ app.whenReady().then(() => {
   ipcMain.on('pkmn:evolve', () => {
     if (!state || !state.hatched) return;
     if (!canEvolve(getSpeciesByKey(state.species), state.level, state.stage)) return;
-    state = { ...state, stage: (state.stage || 0) + 1 };
+    const oldStage = state.stage || 0;
+    // 진화 연출에 쓸 이전/다음 폼 스프라이트(있으면 가운데에서 변신 연출).
+    const from = spriteDataUrl(state.species, oldStage);
+    const to = spriteDataUrl(state.species, oldStage + 1);
+    state = { ...state, stage: oldStage + 1 };
     saveState(dataDir(), state);
-    fetchSpeciesSprites(state.species); // 새 단계 스프라이트 보장
-    playSkillEffect('evolve');          // 화면 전체 진화 연출
+    fetchSpeciesSprites(state.species); // 새 단계 스프라이트 보장(없었을 경우)
+    const opts = {};
+    if (from) opts.from = from;
+    if (to) opts.to = to;
+    playSkillEffect('evolve', opts);    // 화면 가운데 변신 + 전체 연출
     broadcastState({ evolved: true });
   });
 

@@ -28,6 +28,27 @@
   let lastBolt = -1;
   let flashUntil = -1;
 
+  // 진화 변신용: 이전/다음 폼 이미지(main이 data URL로 전달) + 흰 실루엣 사전 생성.
+  const MORPH = 176;
+  let fromImg = null, toImg = null, fromSil = null, toSil = null;
+  function makeSilhouette(img) {
+    const c = document.createElement('canvas');
+    c.width = MORPH; c.height = MORPH;
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.drawImage(img, 0, 0, MORPH, MORPH);
+    g.globalCompositeOperation = 'source-atop'; // 불투명 픽셀만 흰색으로 칠함 → 실루엣
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, MORPH, MORPH);
+    return c;
+  }
+  if (effect === 'evolve') {
+    const q = new URLSearchParams(location.search);
+    const f = q.get('from'), t = q.get('to');
+    if (f) { fromImg = new Image(); fromImg.onload = () => { try { fromSil = makeSilhouette(fromImg); } catch { /* ignore */ } }; fromImg.src = f; }
+    if (t) { toImg = new Image(); toImg.onload = () => { try { toSil = makeSilhouette(toImg); } catch { /* ignore */ } }; toImg.src = t; }
+  }
+
   function setup() {
     if (effect === 'leaf') {
       for (let i = 0; i < 80; i++) parts.push({
@@ -309,7 +330,51 @@
         ctx.fill();
         ctx.restore();
       }
+    } else if (effect === 'evolve' && (fromImg || toImg)) {
+      // 가운데 변신: 현재 폼 실루엣이 점점 빠르게 점멸 → 흰 플래시 → 새 폼 공개 + 별 폭발.
+      // (원작 애니 복제가 아니라 흔한 변신 연출을 이미지로 표현)
+      const cx = W / 2, cy = H / 2;
+      const dx = cx - MORPH / 2, dy = cy - MORPH / 2;
+      ctx.imageSmoothingEnabled = false;
+      if (nowT < 1.45) {
+        const speed = 4 + nowT * 9;                 // 점멸 가속
+        const showTo = Math.floor(nowT * speed) % 2 === 1;
+        const sil = showTo ? (toSil || fromSil) : (fromSil || toSil);
+        ctx.globalAlpha = alpha;
+        if (sil) ctx.drawImage(sil, dx, dy);
+        else if (fromImg && fromImg.complete) ctx.drawImage(fromImg, dx, dy, MORPH, MORPH);
+      } else if (toImg && toImg.complete) {
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(toImg, dx, dy, MORPH, MORPH); // 새 폼 공개(컬러)
+      }
+      // 흰 플래시(1.3~1.6s)
+      if (nowT > 1.3 && nowT < 1.6) {
+        const fp = 1 - Math.abs((nowT - 1.45) / 0.15);
+        ctx.globalAlpha = Math.max(0, fp) * alpha;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, W, H);
+      }
+      // 공개 후 별 폭발(1.5s~)
+      for (const p of parts) {
+        const age = nowT - 1.5 - p.delay;
+        if (age < 0) continue;
+        const d = (p.r0 * 0.4 + 80) * age;
+        const x = cx + Math.cos(p.ang) * d, y = cy + Math.sin(p.ang) * d;
+        ctx.save();
+        ctx.globalAlpha = alpha * Math.max(0, 1 - age / 1.1);
+        ctx.translate(x, y);
+        ctx.rotate(age * p.spin);
+        ctx.fillStyle = p.c;
+        const s = p.size + 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -s); ctx.lineTo(s * 0.3, -s * 0.3); ctx.lineTo(s, 0); ctx.lineTo(s * 0.3, s * 0.3);
+        ctx.lineTo(0, s); ctx.lineTo(-s * 0.3, s * 0.3); ctx.lineTo(-s, 0); ctx.lineTo(-s * 0.3, -s * 0.3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
     } else if (effect === 'evolve') {
+      // 이미지가 없을 때(코드 도트 펫): 파티클 진화 연출(수렴→플래시→별).
       const cx = W / 2, cy = H / 2;
       // 1) 수렴 (0~1.1s): 바깥의 에너지가 중앙으로 모임
       const conv = Math.min(1, nowT / 1.1);
