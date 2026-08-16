@@ -3,8 +3,6 @@ import { join } from 'node:path';
 import { SAVE_FILE } from './paths.js';
 import { ROSTER, getSpeciesByKey, stageForLevel } from './roster.js';
 import { levelForXp } from './xp-engine.js';
-import { sign, verify } from './integrity.js';
-import { getSecret } from './secret.js';
 
 export function defaultState() {
   return {
@@ -35,18 +33,15 @@ export function loadState(dir) {
   };
   let parsed;
   try { parsed = JSON.parse(readFileSync(file, 'utf8')); } catch { return backupAndReset(); }
-  // 서명 형식이 아니거나 검증 실패 → 조작/손상으로 간주해 초기화
-  if (!parsed || typeof parsed !== 'object' || !('data' in parsed) || !('sig' in parsed)) {
-    return backupAndReset();
-  }
-  if (!verify(parsed.data, parsed.sig, getSecret(dir))) return backupAndReset();
-  return recompute({ ...defaultState(), ...parsed.data });
+  // 손상(비객체) 시에만 백업 후 초기화. (개인용 — 서명/치팅 방지 없음)
+  if (!parsed || typeof parsed !== 'object') return backupAndReset();
+  // level/stage는 항상 xp에서 재계산(저장값 신뢰 안 함 — 손상/실수 방지 목적).
+  return recompute({ ...defaultState(), ...parsed });
 }
 
 export function saveState(dir, state) {
   mkdirSync(dir, { recursive: true });
-  const data = recompute(state);
-  writeFileSync(join(dir, SAVE_FILE), JSON.stringify({ data, sig: sign(data, getSecret(dir)) }, null, 2));
+  writeFileSync(join(dir, SAVE_FILE), JSON.stringify(recompute(state), null, 2));
 }
 
 export function rollStarter(state, rng = Math.random) {

@@ -16,5 +16,5 @@ UserPromptSubmit=달리기 시작, Stop=idle 복귀):
 }
 ```
 
-훅은 서명된 이벤트를 `~/.pocketmon/events.jsonl`에 append하며, 앱이 이를 감시해
+훅은 이벤트를 `~/.pocketmon/events.jsonl`에 append하며, 앱이 이를 감시해
 XP·활동 애니메이션(달리기/기술)에 반영한다.
