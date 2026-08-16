@@ -281,14 +281,14 @@ const prettify = (slug) => slug.split('-').map((w) => w.charAt(0).toUpperCase() 
 // 그 종이 배우는 "타입 일치" 기술 4개의 실제 이름을 공개 PokéAPI에서 런타임 조회해
 // ~/.pocketmon/moves/<종>.json 에 캐시(앱/레포에 무브셋 미포함). 이펙트는 오리지널 타입 연출.
 // 실패/오프라인이면 캐시 없음 → 렌더러가 내장 기본 기술명으로 폴백.
-async function fetchMoves(species) {
+async function fetchMoves(species, stage) {
   try {
     const line = dexLine(species);
-    if (!line.length) return;
-    const file = join(movesDirPath(), `${species}.json`);
+    if (!line.length || line[stage] == null) return;
+    const file = join(movesDirPath(), `${species}_${stage}.json`);
     if (existsSync(file)) return;
     const [pk, ty] = await Promise.all([
-      fetch(pokemonUrl(line[0])).then((r) => r.json()),
+      fetch(pokemonUrl(line[stage])).then((r) => r.json()),
       fetch(typeUrl(species)).then((r) => r.json()),
     ]);
     const learnable = new Set((pk.moves || []).map((m) => m.move.name));
@@ -311,15 +311,19 @@ async function fetchMoves(species) {
   } catch { /* 실패 → 폴백(내장 기술명) */ }
 }
 
-// 종이 바뀌었고 무브 캐시가 준비되면 payload에 moves를 실어 렌더러에 전달(매 tick 방지).
+// 진화 라인 전체(3단계) 기술을 미리 받아둔다 → 진화 순간 바로 교체 가능.
+function fetchMovesLine(species) { for (let s = 0; s < 3; s++) fetchMoves(species, s); }
+
+// 종/단계가 바뀌었고 그 단계 무브 캐시가 준비되면 payload에 moves를 전달(매 tick 방지).
 function attachMoves(payload) {
   if (!state || !state.hatched || !state.species) return;
-  if (state.species === lastMovesSig) return;
+  const sig = `${state.species}_${state.stage || 0}`;
+  if (sig === lastMovesSig) return;
   try {
-    const file = join(movesDirPath(), `${state.species}.json`);
+    const file = join(movesDirPath(), `${state.species}_${state.stage || 0}.json`);
     if (!existsSync(file)) return;
     payload.moves = JSON.parse(readFileSync(file, 'utf8'));
-    lastMovesSig = state.species;
+    lastMovesSig = sig;
   } catch { /* ignore */ }
 }
 
@@ -479,7 +483,7 @@ app.whenReady().then(() => {
   saveState(dir, state);
 
   // 이미 부화한 경우에만 실제 스프라이트·기술을 PokéAPI에서 캐시(없을 때만, 비동기).
-  if (state.hatched && state.species) { fetchSpeciesSprites(state.species); fetchMoves(state.species); }
+  if (state.hatched && state.species) { fetchSpeciesSprites(state.species); fetchMovesLine(state.species); }
 
   // 렌더러의 수동 드래그 → 창 이동. 네이티브 -webkit-app-region:drag 대신 이 경로를 쓴다
   // (그래야 캔버스 클릭=핀 토글이 드래그 히트테스트에 먹히지 않는다).
@@ -511,7 +515,7 @@ app.whenReady().then(() => {
     state = { ...state, hatched: true };
     saveState(dataDir(), state);
     fetchSpeciesSprites(state.species); // 부화한 종의 실제 스프라이트 받기
-    fetchMoves(state.species);           // 실제 타입 기술명 받기
+    fetchMovesLine(state.species);       // 라인 전체 기술 미리 받기(진화 시 즉시 교체)
     playSkillEffect('hatch');            // 화면 전체 부화 연출
     broadcastState({ hatched: true });
   });
@@ -527,6 +531,7 @@ app.whenReady().then(() => {
     state = { ...state, stage: oldStage + 1 };
     saveState(dataDir(), state);
     fetchSpeciesSprites(state.species); // 새 단계 스프라이트 보장(없었을 경우)
+    fetchMoves(state.species, state.stage); // 새 단계 기술 보장(미리 안 받았을 경우)
     const opts = {};
     if (from) opts.from = from;
     if (to) opts.to = to;
