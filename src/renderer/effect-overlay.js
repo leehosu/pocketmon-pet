@@ -111,6 +111,12 @@
         size: rand(2, 6), c: pick(['#ffffff', '#7ac6ff', '#f8c838', '#fff27a']),
         spin: rand(-6, 6), delay: rand(0, 0.3),
       });
+    } else if (effect.endsWith('_beam')) {
+      // 빔 끝 스파크
+      for (let i = 0; i < 40; i++) parts.push({ off: rand(0, 1), y: rand(-8, 8), size: rand(1.5, 4), c: pick(colors) });
+    } else if (effect.endsWith('_impact')) {
+      // 임팩트 파편(사방으로)
+      for (let i = 0; i < 55; i++) parts.push({ ang: rand(0, TAU), speed: rand(160, 520), size: rand(2, 6), c: pick(colors), delay: rand(0, 0.08) });
     }
     // electric_bolts는 프레임 루프에서 동적으로 큰 볼트 + 화면 번쩍 생성
   }
@@ -243,7 +249,61 @@
       ctx.globalAlpha = alpha;
     }
 
-    if (effect === 'leaf') {
+    if (effect.endsWith('_beam')) {
+      // 빔: 왼쪽에서 충전 → 화면을 가로지르는 굵은 에너지 광선(타입 색). 오리지널.
+      const cyB = H / 2, ox = W * 0.14;
+      ctx.globalCompositeOperation = 'lighter';
+      if (nowT < 0.45) {
+        const r = 10 + nowT * 70;
+        const g = ctx.createRadialGradient(ox, cyB, 0, ox, cyB, r);
+        g.addColorStop(0, colors[0]); g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.globalAlpha = alpha; ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(ox, cyB, r, 0, TAU); ctx.fill();
+      } else {
+        const fp = Math.min(1, (nowT - 0.45) / 0.18);
+        const x2 = ox + (W - ox + 40) * fp;
+        const wob = Math.sin(nowT * 45) * 4;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = colors[0]; ctx.shadowBlur = 26;
+        for (const [w, c] of [[50, colors[0]], [28, colors[1] || colors[0]], [12, '#ffffff']]) {
+          ctx.globalAlpha = alpha * 0.6; ctx.strokeStyle = c; ctx.lineWidth = w;
+          ctx.beginPath(); ctx.moveTo(ox, cyB); ctx.lineTo(x2, cyB + wob); ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+        for (const p of parts) { // 빔 끝 스파크
+          ctx.globalAlpha = alpha * rand(0.3, 0.8);
+          ctx.fillStyle = p.c;
+          ctx.beginPath(); ctx.arc(x2 + rand(-14, 14), cyB + p.y + wob, p.size, 0, TAU); ctx.fill();
+        }
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (effect.endsWith('_impact')) {
+      // 임팩트: 중심 플래시 + 확장 충격파 링 + 사방 파편(타입 색). 오리지널.
+      const cx = W / 2, cy = H / 2;
+      ctx.globalCompositeOperation = 'lighter';
+      if (nowT < 0.22) {
+        ctx.globalAlpha = alpha * (1 - nowT / 0.22);
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(cx, cy, 60 * (1 - nowT / 0.22) + 20, 0, TAU); ctx.fill();
+      }
+      for (let r = 0; r < 3; r++) {
+        const age = nowT - r * 0.11;
+        if (age < 0) continue;
+        ctx.globalAlpha = alpha * Math.max(0, 0.7 - age * 0.9);
+        ctx.strokeStyle = colors[0]; ctx.lineWidth = 9;
+        ctx.beginPath(); ctx.arc(cx, cy, age * 620, 0, TAU); ctx.stroke();
+      }
+      for (const p of parts) {
+        const age = nowT - p.delay;
+        if (age < 0) continue;
+        const d = p.speed * age;
+        const x = cx + Math.cos(p.ang) * d, y = cy + Math.sin(p.ang) * d + 220 * age * age;
+        ctx.globalAlpha = alpha * Math.max(0, 1 - age);
+        ctx.fillStyle = p.c;
+        ctx.beginPath(); ctx.arc(x, y, p.size, 0, TAU); ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (effect === 'leaf') {
       for (const p of parts) {
         p.y += p.vy * dt; p.rot += p.vrot * dt;
         if (p.y > H + 30) p.y = -30;
@@ -320,7 +380,7 @@
       ctx.globalCompositeOperation = 'source-over';
     } else if (effect === 'fire_kanji') {
       // 큰 대(大) 글자를 불로 — 획이 차례로 타오르며 그려진다. (大는 공용 한자, 애니는 오리지널)
-      const cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.52;
+      const cx = W / 2, cy = H / 2, S = Math.min(W, H) * 0.58;
       // 大 3획: 가로(一) → 왼쪽 삐침(丿) → 오른쪽 파임(乀)
       const strokes = [
         [[-0.5, -0.26], [0.5, -0.26]],
@@ -337,7 +397,7 @@
         const ex = ax + (b[0] * S - a[0] * S) * p, ey = ay + (b[1] * S - a[1] * S) * p;
         const flick = 0.85 + 0.15 * Math.sin(nowT * 20 + si);
         ctx.shadowColor = '#ff6a3d'; ctx.shadowBlur = 20;
-        for (const [w, col] of [[28 * flick, '#d13b27'], [17 * flick, '#e08a1e'], [8 * flick, '#f8c838']]) {
+        for (const [w, col] of [[42 * flick, '#d13b27'], [26 * flick, '#e08a1e'], [12 * flick, '#f8c838']]) {
           ctx.globalAlpha = alpha * 0.5; ctx.strokeStyle = col; ctx.lineWidth = w;
           ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke();
         }

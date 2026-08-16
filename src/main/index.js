@@ -33,6 +33,9 @@ const EFFECT_TYPES = [
   'hatch',  // 부화 연출(화면 전체)
   'evolve', // 진화 연출(화면 전체)
   'fire_kanji', // 불대문자: 큰 대(大) 글자를 불로 (公용 한자 + 오리지널 애니)
+  // 개념 기반 오리지널 스타일(타입 색으로 tint) — 기술마다 달라 보이게
+  'grass_beam', 'fire_beam', 'water_beam', 'electric_beam',
+  'grass_impact', 'fire_impact', 'water_impact', 'electric_impact',
 ];
 const DRIFT_STEP_BUSY = 6; // 프롬프트 처리중(달리기) — 크게 움직임
 const DRIFT_STEP_IDLE = 1; // 평상시 — 가끔 조금만 움직임
@@ -279,6 +282,20 @@ const MOVE_EFFECTS = {
 };
 const prettify = (slug) => slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
+// 기술마다 서로 다른 오리지널 이펙트를 배정(이름 해시 기반, 결정적). 게임 애니 복제 아님.
+// - 이름 뜻이 뚜렷하면 전용 연출(불대문자 → 大 불꽃)
+// - 그 외엔 [타입 앰비언트 / 빔 / 임팩트] 중 이름 해시로 하나 선택 → 기술마다 달라 보임
+function effectForMove(species, slug, koName) {
+  if (slug === 'fire-blast' || (koName && koName.includes('대문자'))) return 'fire_kanji';
+  let h = 0;
+  for (const ch of slug) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const pick3 = h % 3;
+  if (pick3 === 1) return `${species}_beam`;
+  if (pick3 === 2) return `${species}_impact`;
+  const variants = MOVE_EFFECTS[species] || ['leaf'];
+  return variants[h % variants.length]; // 타입 앰비언트(기존 연출)
+}
+
 // 그 종이 배우는 "타입 일치" 기술 4개의 실제 이름을 공개 PokéAPI에서 런타임 조회해
 // ~/.pocketmon/moves/<종>.json 에 캐시(앱/레포에 무브셋 미포함). 이펙트는 오리지널 타입 연출.
 // 실패/오프라인이면 캐시 없음 → 렌더러가 내장 기본 기술명으로 폴백.
@@ -298,7 +315,6 @@ async function fetchMoves(species, stage) {
     // (간격을 2로 벌려 1·2·3단계가 겹치지 않게. 목록이 짧으면 끝쪽으로 clamp.)
     const start = Math.max(0, Math.min(stage * 2, all.length - 2));
     const typeMoves = all.slice(start, start + 2);
-    const variants = MOVE_EFFECTS[species] || ['leaf'];
     const out = [];
     for (let i = 0; i < typeMoves.length; i++) {
       let label = prettify(typeMoves[i]);
@@ -307,10 +323,7 @@ async function fetchMoves(species, stage) {
         const ko = (mv.names || []).find((n) => n.language && n.language.name === 'ko');
         if (ko && ko.name) label = ko.name;
       } catch { /* 이름 로컬라이즈 실패 → 영문 프리티 */ }
-      // 이름이 "큰 대(大) 글자"를 뜻하는 기술(불대문자/fire-blast)은 大를 불로 그리는 전용 이펙트.
-      let eff = variants[i % variants.length];
-      if (typeMoves[i] === 'fire-blast' || label.includes('대문자')) eff = 'fire_kanji';
-      out.push({ name: label, effect: eff });
+      out.push({ name: label, effect: effectForMove(species, typeMoves[i], label) });
     }
     if (out.length) {
       mkdirSync(movesDirPath(), { recursive: true });
