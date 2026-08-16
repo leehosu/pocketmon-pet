@@ -42,6 +42,17 @@
   #detail .d-row{display:flex;justify-content:space-between;gap:8px;}
   #detail .d-row span{color:#9aa0c8;}
   #detail .d-row b{font-weight:600;text-align:right;}
+  #detail .d-skills-label{margin-top:8px;margin-bottom:4px;color:#9aa0c8;font-size:9px;
+    text-transform:uppercase;letter-spacing:.06em;border-top:1px solid #2c3050;padding-top:6px;}
+  #detail .d-skills{display:flex;flex-wrap:wrap;gap:5px;}
+  /* 버튼만 클릭 가능(#detail 자체는 pointer-events:none) */
+  #detail .skill-btn{
+    pointer-events:auto;-webkit-app-region:no-drag;cursor:pointer;
+    font:10px monospace;color:#e8eaff;background:#1f2236;border:1px solid #2c3050;
+    border-radius:6px;padding:5px 8px;transition:.12s;
+  }
+  #detail .skill-btn:hover{background:#f8c838;color:#1a1400;border-color:#f8c838;}
+  #detail .skill-btn:active{transform:translateY(1px);}
 </style></head>
 <body>
   <canvas id="pet" width="96" height="96"></canvas>

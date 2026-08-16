@@ -18,9 +18,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const TICK_MS = 4000;
 const WINDOW_SIZE = 96;
-// 더블클릭 상세 패널을 담기 위해 창을 잠깐 확장할 크기(닫으면 WINDOW_SIZE로 원복).
-const DETAIL_WIDTH = 200;
-const DETAIL_HEIGHT = 232;
+// 더블클릭 상세 패널(상태 + 기술 버튼)을 담기 위해 창을 잠깐 확장할 크기(닫으면 WINDOW_SIZE로 원복).
+const DETAIL_WIDTH = 210;
+const DETAIL_HEIGHT = 320;
+// 기술 이펙트 오버레이 자동 종료 시간.
+const EFFECT_DURATION_MS = 2800;
+const EFFECT_TYPES = ['leaf', 'fire', 'water', 'electric'];
 const DRIFT_STEP_BUSY = 6; // 프롬프트 처리중(달리기) — 크게 움직임
 const DRIFT_STEP_IDLE = 1; // 평상시 — 가끔 조금만 움직임
 const IDLE_MOVE_CHANCE = 0.15;
@@ -39,6 +42,7 @@ const TRAY_ICON_PNG_BASE64 =
 const MANUAL_MOVE_COOLDOWN_MS = 1500;
 
 let mainWindow = null;
+let effectWin = null;
 let tray = null;
 let intervalId = null;
 let driftDir = 1;
@@ -164,6 +168,38 @@ function driftWindow(activity) {
 // 폴더 전체를 매 tick 재전송하면 대용량 IPC가 되므로, 파일목록+mtime+size로
 // 만든 시그니처가 바뀔 때만(=최초 1회 포함) 재로드해 payload에 싣는다.
 let customSpritesSignature = null;
+
+// 기술 이펙트: 현재 디스플레이 전체를 덮는 투명·클릭통과 오버레이 창을 만들어
+// 타입별 파티클 애니(effect-overlay)를 재생하고 EFFECT_DURATION_MS 후 자동 종료.
+function playSkillEffect(effect) {
+  if (!EFFECT_TYPES.includes(effect)) return;
+  // 이전 이펙트가 남아 있으면 먼저 정리(중첩 방지).
+  if (effectWin && !effectWin.isDestroyed()) { effectWin.close(); }
+  effectWin = null;
+
+  const disp = mainWindow && !mainWindow.isDestroyed()
+    ? screen.getDisplayMatching(mainWindow.getBounds())
+    : screen.getPrimaryDisplay();
+  const b = disp.bounds;
+
+  const win = new BrowserWindow({
+    x: b.x, y: b.y, width: b.width, height: b.height,
+    transparent: true, frame: false, hasShadow: false,
+    resizable: false, movable: false, minimizable: false, maximizable: false,
+    focusable: false, skipTaskbar: true, enableLargerThanScreen: true,
+    webPreferences: { contextIsolation: true },
+  });
+  effectWin = win;
+  win.setIgnoreMouseEvents(true, { forward: true }); // 클릭이 데스크톱으로 통과
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.loadFile(join(__dirname, '../renderer/effect-overlay.html'), { query: { effect } });
+
+  setTimeout(() => {
+    if (win && !win.isDestroyed()) win.close();
+    if (effectWin === win) effectWin = null;
+  }, EFFECT_DURATION_MS);
+}
 
 function spritesDirPath() { return join(dataDir(), SPRITE_DIR); }
 
@@ -302,6 +338,9 @@ app.whenReady().then(() => {
     const h = open ? DETAIL_HEIGHT : WINDOW_SIZE;
     mainWindow.setBounds({ x, y, width: w, height: h });
   });
+
+  // 기술 선택 → 현재 디스플레이 전체를 덮는 투명·클릭통과 오버레이 창에서 이펙트 재생.
+  ipcMain.on('pkmn:play-skill', (_e, effect) => playSkillEffect(effect));
 
   createWindow();
   createTray();
