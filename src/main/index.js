@@ -3,9 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   existsSync, statSync, openSync, readSync, closeSync, readdirSync, readFileSync,
-  writeFileSync, mkdirSync,
+  writeFileSync, mkdirSync, createWriteStream, renameSync, unlinkSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
+import https from 'node:https';
 
 import { dataDir, EVENTS_FILE } from '../core/paths.js';
 import { verify } from '../core/integrity.js';
@@ -13,6 +14,7 @@ import { loadState, saveState } from '../core/store.js';
 import { parseSessionLines } from '../core/session-parser.js';
 import { tick, ensureStarter } from './orchestrator.js';
 import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
+import { dexLine, spriteUrl } from '../core/pokeapi.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -208,6 +210,46 @@ function playSkillEffect(effect) {
 
 function spritesDirPath() { return join(dataDir(), SPRITE_DIR); }
 
+// 공개 URL을 파일로 다운로드(리다이렉트 추적, tmp→rename). 실패는 콜백으로 전달.
+function downloadTo(url, dest, cb, redirects) {
+  redirects = redirects || 0;
+  const req = https.get(url, (res) => {
+    const code = res.statusCode;
+    if ([301, 302, 307, 308].includes(code) && res.headers.location && redirects < 5) {
+      res.resume();
+      downloadTo(res.headers.location, dest, cb, redirects + 1);
+      return;
+    }
+    if (code !== 200) { res.resume(); cb(new Error('HTTP ' + code)); return; }
+    const tmp = dest + '.download';
+    const ws = createWriteStream(tmp);
+    res.pipe(ws);
+    ws.on('finish', () => ws.close(() => {
+      try { renameSync(tmp, dest); } catch (e) { cb(e); return; }
+      cb(null);
+    }));
+    ws.on('error', (e) => { try { unlinkSync(tmp); } catch { /* ignore */ } cb(e); });
+  });
+  req.on('error', cb);
+  req.setTimeout(10000, () => req.destroy(new Error('timeout')));
+}
+
+// 현재 종의 진화 라인 스프라이트를 공개 PokéAPI에서 런타임 다운로드해
+// ~/.pocketmon/sprites/<key>_<stage>.png 로 캐시(앱에 번들하지 않음). 이미 있으면 건너뛴다.
+// 실패/오프라인은 조용히 무시 — 기존 코드 도트로 폴백. 다운로드 성공 시 다음 tick의
+// 스프라이트 폴더 서명 갱신이 자동으로 렌더러에 반영한다.
+function fetchSpeciesSprites(key) {
+  const line = dexLine(key);
+  if (!line.length) return;
+  const dir = spritesDirPath();
+  try { mkdirSync(dir, { recursive: true }); } catch { return; }
+  line.forEach((dexId, stage) => {
+    const dest = join(dir, `${key}_${stage}.png`);
+    if (existsSync(dest)) return;
+    downloadTo(spriteUrl(dexId), dest, () => { /* 성공/실패 모두 별도 처리 불필요 */ });
+  });
+}
+
 function computeSpritesSignature(dir) {
   let entries;
   try { entries = readdirSync(dir); } catch { return ''; }
@@ -309,6 +351,7 @@ function createTray() {
   const menu = Menu.buildFromTemplate([
     { label: '상태 보기', click: () => sendMenuCommand('showStatus') },
     { label: '첫 만남 다시보기', click: () => sendMenuCommand('replayIntro') },
+    { label: '포켓몬 스프라이트 받기(PokéAPI)', click: () => { if (state) fetchSpeciesSprites(state.species); } },
     { type: 'separator' },
     { label: '종료', click: () => app.quit() },
   ]);
@@ -324,6 +367,9 @@ app.whenReady().then(() => {
   state = ensureStarter(loadState(dir), Math.random);
   state = { ...state, busy: false }; // 재시작 잔여 busy 무시
   saveState(dir, state);
+
+  // 현재 종의 실제 포켓몬 스프라이트를 공개 PokéAPI에서 런타임 캐시(없을 때만, 비동기).
+  fetchSpeciesSprites(state.species);
 
   // 렌더러의 수동 드래그 → 창 이동. 네이티브 -webkit-app-region:drag 대신 이 경로를 쓴다
   // (그래야 캔버스 클릭=핀 토글이 드래그 히트테스트에 먹히지 않는다).
