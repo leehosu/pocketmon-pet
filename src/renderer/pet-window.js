@@ -370,6 +370,7 @@ if (typeof window !== 'undefined') {
     if (window.pkmn && typeof window.pkmn.playSkill === 'function') {
       window.pkmn.playSkill(btn.dataset.effect);
     }
+    playCry(); // 기술 사용 시 울음소리도 함께
   });
 
   if (window.pkmn && typeof window.pkmn.onState === 'function') {
