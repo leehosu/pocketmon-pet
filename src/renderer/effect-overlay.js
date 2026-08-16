@@ -121,22 +121,43 @@
       cx += rand(-70, 70);
       cy += stepY;
     }
-    return { segs, born: nowT, life: rand(0.14, 0.26), c: pick(COL.electric), w: big ? rand(3, 6) : rand(2, 3.5) };
+    // 잔가지: 중간 지점 몇 곳에서 짧게 갈라져 나감
+    const branches = [];
+    const nb = big ? 3 : 1;
+    for (let i = 0; i < nb; i++) {
+      const from = segs[Math.floor(rand(1, segs.length - 1))];
+      const bs = [{ x: from.x, y: from.y }];
+      let bx = from.x, by = from.y;
+      const bsteps = Math.floor(rand(2, 5));
+      for (let s = 0; s < bsteps; s++) { bx += rand(-40, 40); by += rand(20, 50); bs.push({ x: bx, y: by }); }
+      branches.push(bs);
+    }
+    return { segs, branches, born: nowT, life: rand(0.14, 0.26), c: pick(COL.electric), w: big ? rand(3, 6) : rand(2, 3.5) };
   }
 
   function drawLeaf(x, y, rot, size, c) {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rot);
+    // 끝이 뾰족한 나뭇잎 실루엣(양쪽 곡선)
     ctx.fillStyle = c;
     ctx.beginPath();
-    ctx.ellipse(0, 0, size * 0.5, size, 0, 0, TAU);
+    ctx.moveTo(0, -size);
+    ctx.quadraticCurveTo(size * 0.62, -size * 0.15, 0, size);
+    ctx.quadraticCurveTo(-size * 0.62, -size * 0.15, 0, -size);
+    ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,.22)';
+    // 잎맥
+    ctx.strokeStyle = 'rgba(0,0,0,.20)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, -size); ctx.lineTo(0, size);
+    ctx.moveTo(0, -size * 0.85); ctx.lineTo(0, size * 0.85);
     ctx.stroke();
+    // 하이라이트(입체감)
+    ctx.fillStyle = 'rgba(255,255,255,.28)';
+    ctx.beginPath();
+    ctx.ellipse(-size * 0.2, -size * 0.15, size * 0.12, size * 0.34, 0.3, 0, TAU);
+    ctx.fill();
     ctx.restore();
   }
 
@@ -154,16 +175,28 @@
       ctx.fillRect(0, 0, W, H);
     }
     bolts = bolts.filter((b) => nowT - b.born < b.life);
-    for (const b of bolts) {
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = b.c;
-      ctx.lineWidth = b.w;
-      ctx.shadowColor = '#f8c838';
-      ctx.shadowBlur = 10;
+    const strokePath = (pts, w) => {
+      ctx.lineWidth = w;
       ctx.beginPath();
-      ctx.moveTo(b.segs[0].x, b.segs[0].y);
-      for (let i = 1; i < b.segs.length; i++) ctx.lineTo(b.segs[i].x, b.segs[i].y);
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
       ctx.stroke();
+    };
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const b of bolts) {
+      ctx.shadowColor = '#f8c838';
+      ctx.shadowBlur = 16;
+      // 바깥 글로우(굵고 노란)
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.strokeStyle = b.c;
+      strokePath(b.segs, b.w + 2.5);
+      for (const br of b.branches) strokePath(br, Math.max(1, b.w - 0.5));
+      // 밝은 흰 코어
+      ctx.shadowBlur = 6;
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = '#ffffff';
+      strokePath(b.segs, Math.max(1, b.w - 1));
     }
     ctx.shadowBlur = 0;
   }
@@ -280,17 +313,26 @@
       }
       ctx.globalCompositeOperation = 'source-over';
     } else if (effect === 'water') {
-      ctx.lineCap = 'round';
       for (const p of parts) {
         const age = nowT - p.delay;
         if (age < 0 || age > p.life) continue;
         const y = age * p.vy;
-        ctx.globalAlpha = alpha * 0.85;
-        ctx.strokeStyle = p.c;
-        ctx.lineWidth = 2;
+        const w = 2.6;
+        ctx.globalAlpha = alpha * 0.9;
+        // 물방울: 아래는 둥글고 위는 뾰족한 테어드롭
+        ctx.fillStyle = p.c;
         ctx.beginPath();
-        ctx.moveTo(p.x, y); ctx.lineTo(p.x, y + p.len);
-        ctx.stroke();
+        ctx.moveTo(p.x, y);                                   // 뾰족한 위
+        ctx.quadraticCurveTo(p.x + w, y + p.len * 0.7, p.x, y + p.len);
+        ctx.quadraticCurveTo(p.x - w, y + p.len * 0.7, p.x, y);
+        ctx.closePath();
+        ctx.fill();
+        // 하이라이트
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(p.x - 0.7, y + p.len * 0.72, 0.9, 0, TAU);
+        ctx.fill();
       }
       // 하단 물결 링(퍼짐)
       ctx.lineWidth = 2;
