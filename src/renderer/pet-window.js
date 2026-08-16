@@ -2,7 +2,7 @@ import { getFrames } from '../core/sprites/index.js';
 import { PALETTE } from '../core/sprites/palette.js';
 import { drawFrame } from './canvas-render.js';
 import { xpForLevel, XP_RULES } from '../core/xp-engine.js';
-import { getSpeciesByKey } from '../core/roster.js';
+import { getSpeciesByKey, canEvolve } from '../core/roster.js';
 import { customCandidates } from '../core/sprite-files.js';
 
 // ============================================================
@@ -54,6 +54,16 @@ const SKILLS_BY_KEY = {
 export function skillsFor(species) {
   if (!species || !species.key) return [];
   return SKILLS_BY_KEY[species.key] || [];
+}
+
+// 현재 상태에서 "!" 클릭으로 할 수 있는 행동(순수). 부화 전이면 hatch, 부화 후 진화 가능하면 evolve.
+export function petAction(state) {
+  if (!state) return { kind: null, can: false };
+  if (!state.hatched) {
+    return { kind: 'hatch', can: (state.xp || 0) >= XP_RULES.hatchXp };
+  }
+  const sp = getSpeciesByKey(state.species);
+  return { kind: 'evolve', can: canEvolve(sp, state.level || 1, state.stage || 0) };
 }
 
 // 더블클릭 상세 패널용 값 계산(순수). species는 getSpeciesByKey 결과(없으면 undefined).
@@ -122,6 +132,7 @@ if (typeof window !== 'undefined') {
   const xpFillEl = document.getElementById('xp-fill');
   const statusEl = document.getElementById('status');
   const detailEl = document.getElementById('detail');
+  const alertEl = document.getElementById('alert'); // 부화/진화 "!" 배지
 
   let latest = null; // 마지막으로 수신한 { state, changes, activity, command }
 
@@ -191,7 +202,8 @@ if (typeof window !== 'undefined') {
     if (activity && activity.skillPulse) triggerSkillPulse();
 
     if (changes) {
-      if (changes.evolved) triggerReact('진화!');
+      if (changes.hatched) triggerReact('부화!');
+      else if (changes.evolved) triggerReact('진화!');
       else if (changes.leveledUp) triggerReact('Lv↑');
     }
 
@@ -204,9 +216,17 @@ if (typeof window !== 'undefined') {
 
     if (state) renderHud(state);
     if (detailOpen) renderDetail(); // 상세 패널이 열려 있으면 최신 상태로 갱신
+    updateAlert();
   }
 
   function renderHud(state) {
+    if (!state.hatched) {
+      // 알 상태: 부화까지의 진행도(정체 숨김).
+      const p = Math.min(1, Math.max(0, (state.xp || 0) / XP_RULES.hatchXp));
+      xpFillEl.style.width = `${Math.round(p * 100)}%`;
+      statusEl.textContent = p >= 1 ? '알 · 부화 준비 완료!' : '알 · 부화 중…';
+      return;
+    }
     const species = getSpeciesByKey(state.species);
     const level = state.level || 1;
     const curFloor = xpForLevel(level);
@@ -224,6 +244,21 @@ if (typeof window !== 'undefined') {
     const visible = !detailOpen && hudVisible({ hovering, pinned });
     hudEl.style.opacity = visible ? '1' : '0';
   }
+
+  // 부화/진화 가능하면 "!" 배지 표시.
+  function updateAlert() {
+    const a = petAction(latest && latest.state);
+    alertEl.style.opacity = a.can ? '1' : '0';
+    alertEl.title = a.kind === 'hatch' ? '부화하기' : '진화하기';
+  }
+
+  // "!" 클릭 → 부화 또는 진화(메인이 서명 상태로 처리).
+  alertEl.addEventListener('click', () => {
+    const a = petAction(latest && latest.state);
+    if (!a.can) return;
+    if (a.kind === 'hatch') window.pkmn && window.pkmn.hatch && window.pkmn.hatch();
+    else window.pkmn && window.pkmn.evolve && window.pkmn.evolve();
+  });
 
   function renderDetail() {
     if (!detailOpen) { detailEl.style.opacity = '0'; return; }
@@ -351,33 +386,38 @@ if (typeof window !== 'undefined') {
     currentAnim = pickAnim({ reacting, skillActive, busy, walking });
 
     const state = latest && latest.state;
-    const species = state && state.species;
-    const stage = state ? state.stage : 0;
-    if (species) {
-      const customKey = pickCustomKey(customKeys, species, stage, currentAnim);
-      const customImg = customKey ? customImages.get(customKey) : null;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (customImg && customImg.complete && customImg.naturalWidth > 0) {
-        // 사용자/PokéAPI PNG는 정지 이미지라, anim별 모션 변형(바운스·뒤뚱·팝)을 입혀 그린다.
-        const m = spriteMotion(currentAnim, tickCount);
-        const cw = canvas.width, ch = canvas.height;
-        ctx.imageSmoothingEnabled = false;
-        ctx.save();
-        ctx.translate(cw / 2 + m.dx, ch / 2 + m.dy);
-        ctx.rotate(m.rot);
-        ctx.scale(m.sx, m.sy);
-        ctx.drawImage(customImg, -cw / 2, -ch / 2, cw, ch);
-        ctx.restore();
-      } else {
-        // 커스텀 이미지가 없거나(파일 없음) 아직 로드 실패/미완료 → 기존 코드 도트 폴백.
-        const frames = getFrames(species, stage, currentAnim);
-        const idx = nextFrameIndex({ tickCount, frameCount: frames.length });
-        const frame = frames[idx];
-        drawFrame(ctx, frame, PALETTE, SCALE);
+    if (state) {
+      // 부화 전이면 종과 무관하게 "알"을 그린다(어떤 포켓몬인지 숨김).
+      const hatched = Boolean(state.hatched);
+      const renderKey = hatched ? state.species : 'egg';
+      const stage = hatched ? (state.stage || 0) : 0;
+      if (renderKey) {
+        // 커스텀/PokéAPI 이미지는 부화 후에만 사용(알은 항상 코드 도트).
+        const customKey = hatched ? pickCustomKey(customKeys, renderKey, stage, currentAnim) : null;
+        const customImg = customKey ? customImages.get(customKey) : null;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (customImg && customImg.complete && customImg.naturalWidth > 0) {
+          // 정지 이미지(PokéAPI/커스텀)에 anim별 모션 변형(바운스·뒤뚱·팝)을 입혀 그린다.
+          const m = spriteMotion(currentAnim, tickCount);
+          const cw = canvas.width, ch = canvas.height;
+          ctx.imageSmoothingEnabled = false;
+          ctx.save();
+          ctx.translate(cw / 2 + m.dx, ch / 2 + m.dy);
+          ctx.rotate(m.rot);
+          ctx.scale(m.sx, m.sy);
+          ctx.drawImage(customImg, -cw / 2, -ch / 2, cw, ch);
+          ctx.restore();
+        } else {
+          // 코드 도트(알 포함). 알도 idle/walk로 살짝 흔들린다.
+          const frames = getFrames(renderKey, stage, currentAnim);
+          const idx = nextFrameIndex({ tickCount, frameCount: frames.length });
+          drawFrame(ctx, frames[idx], PALETTE, SCALE);
+        }
       }
     }
 
     updateHud();
+    updateAlert();
   }
 
   updateHud();

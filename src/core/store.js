@@ -10,14 +10,18 @@ export function defaultState() {
     species: null, level: 1, xp: 0, stage: 0,
     dailyXp: 0, dailyDate: null, seenIds: [],
     locked: false, rolledAt: null, lastActiveAt: null, lastSessionTs: 0,
+    hatched: false, // 최초엔 알 상태. 부화("!" 클릭) 시에만 종이 랜덤 결정된다.
   };
 }
 
-// level/stage는 저장 authority가 아니다 — 항상 xp에서 재계산.
+// level은 항상 xp에서 재계산(저장 authority 아님).
+// stage는 사용자 클릭 진화로만 오르므로 강제 상승시키지 않고, 레벨이 허용하는 최대치로만
+// clamp한다(치팅으로 과도하게 올린 값 방어). 저장된 stage(사용자 진화 결과)는 유지.
 function recompute(state) {
   const level = levelForXp(state.xp || 0);
   const species = getSpeciesByKey(state.species);
-  const stage = species ? stageForLevel(species, level) : 0;
+  const maxStage = species ? stageForLevel(species, level) : 0;
+  const stage = Math.max(0, Math.min(state.stage || 0, maxStage));
   return { ...state, level, stage };
 }
 

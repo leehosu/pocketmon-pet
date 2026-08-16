@@ -5,4 +5,6 @@ contextBridge.exposeInMainWorld('pkmn', {
   moveWindowBy: (dx, dy) => ipcRenderer.send('pkmn:move-window', { dx, dy }),
   setDetail: (open) => ipcRenderer.send('pkmn:set-detail', !!open),
   playSkill: (effect) => ipcRenderer.send('pkmn:play-skill', String(effect)),
+  hatch: () => ipcRenderer.send('pkmn:hatch'),
+  evolve: () => ipcRenderer.send('pkmn:evolve'),
 });
