@@ -31,6 +31,7 @@ const EFFECT_TYPES = [
   'fire', 'fire_breath',
   'water', 'water_bubbles',
   'electric', 'electric_bolts',
+  'hatch', // 부화 연출(화면 전체)
 ];
 const DRIFT_STEP_BUSY = 6; // 프롬프트 처리중(달리기) — 크게 움직임
 const DRIFT_STEP_IDLE = 1; // 평상시 — 가끔 조금만 움직임
@@ -413,6 +414,7 @@ app.whenReady().then(() => {
     state = { ...state, hatched: true };
     saveState(dataDir(), state);
     fetchSpeciesSprites(state.species); // 부화한 종의 실제 스프라이트 받기
+    playSkillEffect('hatch');            // 화면 전체 부화 연출
     broadcastState({ hatched: true });
   });
 
