@@ -1,8 +1,10 @@
 <!doctype html>
 <html>
 <head><meta charset="utf-8"><style>
-  html,body{margin:0;background:transparent;overflow:hidden;}
-  body{width:96px;height:96px;position:relative;}
+  html,body{margin:0;background:transparent;overflow:hidden;width:100%;height:100%;}
+  /* body가 창(Electron BrowserWindow) 크기를 채우도록 — 상세 패널로 창이 커질 때
+     하드코딩 96px에 갇혀 패널이 잘리지 않게 한다. 스프라이트는 top-left 96×96 고정. */
+  body{position:relative;}
   /* 네이티브 -webkit-app-region:drag에 기대지 않고 pet-window.js에서 수동 드래그로
      창을 옮긴다(그래야 캔버스 클릭=핀 토글이 드래그 히트테스트에 먹히지 않는다). */
   canvas{image-rendering:pixelated;position:absolute;top:0;left:0;-webkit-app-region:no-drag;cursor:grab;}

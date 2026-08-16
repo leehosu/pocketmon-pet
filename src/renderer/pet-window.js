@@ -203,7 +203,8 @@ if (typeof window !== 'undefined') {
   }
 
   function updateHud() {
-    const visible = hudVisible({ hovering, pinned });
+    // 상세 패널이 열려 있으면 기본 HUD는 숨긴다(중복 방지 + 커진 창 아래로 밀려나는 것 회피).
+    const visible = !detailOpen && hudVisible({ hovering, pinned });
     hudEl.style.opacity = visible ? '1' : '0';
   }
 
