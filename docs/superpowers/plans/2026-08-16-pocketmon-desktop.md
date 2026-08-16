@@ -20,6 +20,12 @@
 - 이벤트 dedup은 이벤트 `id` 기준.
 - 진화 레벨 기본값: 풀 16/32, 불 16/36, 물 18/30, 전기 10/25.
 - 레벨업 필요 누적 XP 곡선: 레벨 L 도달에 필요한 누적 XP = `floor(100 * L^1.5)`.
+- **치팅 방지(tamper-evident)**: 레벨·진화단계는 저장 authority가 아니라 XP에서
+  항상 재계산(로드 시에도 재계산해 저장값을 덮어씀). XP를 직접 설정하는 API/메뉴
+  없음. save.json은 HMAC 서명(`{data,sig}`), 로드 시 검증 실패면 조작으로 간주해
+  안전 초기화. hook 이벤트도 HMAC 서명, 유효 서명 이벤트만 XP·반응에 반영.
+- HMAC 비밀키·서명 로직은 `src/core/integrity.js` 한 곳에서 관리(로컬 앱이라 완전
+  비밀은 아니고 난독화 수준의 억지력임을 코드 주석에 명시).
 
 ---
 
@@ -301,32 +307,102 @@ git add -A && git commit -m "feat: XP 엔진 (레벨 곡선, dedup, 일일 상�
 
 ---
 
-### Task 3: 세이브 저장소 + 뽑기(1회성 영구 지정)
+### Task 3: 세이브 저장소 + 뽑기(1회성 영구 지정) + 무결성 서명
 
 **Files:**
 - Create: `src/core/paths.js`
+- Create: `src/core/integrity.js`
 - Create: `src/core/store.js`
+- Test: `test/integrity.test.js`
 - Test: `test/store.test.js`
 
 **Interfaces:**
-- Consumes: `roster.js`의 `ROSTER`.
+- Consumes: `roster.js`의 `ROSTER`; `xp-engine.js`의 `levelForXp`; `roster.js`의 `stageForLevel`; `store.js`의 `getSpeciesByKey`(로드 시 재계산용).
+- Produces (`integrity.js`):
+  - `SECRET`: 내장 HMAC 키 상수(주석에 "로컬 앱이라 완전 비밀 아님, 난독화 수준 억지력" 명시).
+  - `canonical(obj) -> string` — 키 정렬 안정 직렬화(서명 대상 정규화).
+  - `sign(obj, secret = SECRET) -> string` — HMAC-SHA256 hex.
+  - `verify(obj, sig, secret = SECRET) -> boolean` — 타이밍-세이프 비교.
 - Produces (`store.js`):
-  - `defaultState() -> state` (Task 2 state 스키마 + `locked: false`, `rolledAt: null`).
-  - `loadState(dir) -> state` — 파일 없거나 손상 시 안전 기본값(손상 파일은 `.bak`으로 백업). locked 스타터는 최대한 보존.
-  - `saveState(dir, state) -> void`.
+  - `defaultState() -> state` (Task 2 state 스키마 + `locked: false`, `rolledAt: null`, `lastActiveAt: null`, `lastSessionTs: 0`).
+  - `loadState(dir) -> state` — 파일 없으면 기본값. 파일이 `{data,sig}`이고 서명 검증 통과 시 `data` 반환하되 **level/stage를 XP에서 재계산해 덮어씀**. 서명 불일치·손상·구형식이면 조작/손상으로 간주해 손상 파일을 `.bak`으로 백업하고 안전 기본값 반환(초기화).
+  - `saveState(dir, state) -> void` — level/stage 재계산 후 `{ data: state, sig: sign(state) }`로 저장.
   - `rollStarter(state, rng = Math.random) -> state` — `locked`가 false일 때만 랜덤 종 지정 후 `locked: true`, `rolledAt` 세팅. 이미 locked면 그대로 반환(재추첨 불가).
 - Produces (`paths.js`):
   - `dataDir() -> string` — `~/.pocketmon` 절대경로.
   - `SAVE_FILE`, `EVENTS_FILE` 상수(파일명).
 
-- [ ] **Step 1: 실패하는 테스트 작성** (`test/store.test.js`)
+- [ ] **Step 1: integrity 실패 테스트 작성** (`test/integrity.test.js`)
+
+```js
+import { describe, it, expect } from 'vitest';
+import { sign, verify, canonical } from '../src/core/integrity.js';
+
+describe('integrity', () => {
+  it('canonical is key-order stable', () => {
+    expect(canonical({ a: 1, b: 2 })).toBe(canonical({ b: 2, a: 1 }));
+  });
+  it('sign/verify round-trips', () => {
+    const obj = { xp: 100, species: 'fire' };
+    const sig = sign(obj);
+    expect(verify(obj, sig)).toBe(true);
+  });
+  it('rejects a tampered object', () => {
+    const sig = sign({ xp: 100 });
+    expect(verify({ xp: 999 }, sig)).toBe(false);
+  });
+  it('rejects a bad signature', () => {
+    expect(verify({ xp: 100 }, 'deadbeef')).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: integrity 테스트 실패 확인**
+
+Run: `npx vitest run test/integrity.test.js`
+Expected: FAIL — integrity.js 없음.
+
+- [ ] **Step 3: integrity.js 구현**
+
+```js
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+// 로컬 데스크톱 앱이라 이 키는 바이너리에서 추출 가능 — 완전 비밀이 아니라
+// 수기 편집을 감지하는 "난독화 수준" 억지력이다(서버 권위 계산이 아님).
+export const SECRET = 'pkmn-desktop-v1-integrity-key-do-not-rely-as-real-secret';
+
+export function canonical(obj) {
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) return '[' + obj.map(canonical).join(',') + ']';
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + canonical(obj[k])).join(',') + '}';
+}
+
+export function sign(obj, secret = SECRET) {
+  return createHmac('sha256', secret).update(canonical(obj)).digest('hex');
+}
+
+export function verify(obj, sig, secret = SECRET) {
+  if (typeof sig !== 'string') return false;
+  const expected = sign(obj, secret);
+  if (expected.length !== sig.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(sig, 'hex'));
+  } catch {
+    return false;
+  }
+}
+```
+
+- [ ] **Step 4: store 실패 테스트 작성** (`test/store.test.js`)
 
 ```js
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultState, loadState, saveState, rollStarter } from '../src/core/store.js';
+import { xpForLevel } from '../src/core/xp-engine.js';
 
 let dir;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'pkmn-')); });
@@ -338,36 +414,59 @@ describe('store', () => {
     expect(s.level).toBe(1);
   });
 
-  it('round-trips save/load', () => {
-    const s = { ...defaultState(), species: 'fire', level: 5, xp: 999, locked: true };
+  it('round-trips save/load (signed)', () => {
+    const s = { ...defaultState(), species: 'fire', xp: xpForLevel(5), locked: true };
     saveState(dir, s);
-    expect(loadState(dir).xp).toBe(999);
+    const loaded = loadState(dir);
+    expect(loaded.xp).toBe(xpForLevel(5));
+    expect(loaded.level).toBe(5); // derived from xp
   });
 
-  it('recovers from corrupt save file', () => {
+  it('recovers (resets) from corrupt save file', () => {
     writeFileSync(join(dir, 'save.json'), '{not json');
     const s = loadState(dir);
-    expect(s.level).toBe(1); // safe default, no throw
+    expect(s.level).toBe(1);
+    expect(existsSync(join(dir, 'save.json.bak'))).toBe(true);
+  });
+
+  it('rejects a hand-tampered save and resets (anti-cheat)', () => {
+    const s = { ...defaultState(), species: 'electric', xp: 100, locked: true };
+    saveState(dir, s);
+    // attacker edits xp to 999999 in the data block, keeping old sig
+    const raw = JSON.parse(readFileSync(join(dir, 'save.json'), 'utf8'));
+    raw.data.xp = 999999;
+    writeFileSync(join(dir, 'save.json'), JSON.stringify(raw));
+    const loaded = loadState(dir);
+    expect(loaded.xp).toBe(0);      // reset, cheat rejected
+    expect(loaded.locked).toBe(false);
+  });
+
+  it('recomputes level/stage from xp even if stored values are forged', () => {
+    // valid signature but we saved via saveState which recomputes anyway;
+    // simulate by saving a state whose level field is wrong before signing
+    const s = { ...defaultState(), species: 'electric', xp: xpForLevel(10), level: 1, stage: 0, locked: true };
+    saveState(dir, s);
+    const loaded = loadState(dir);
+    expect(loaded.level).toBe(10);
+    expect(loaded.stage).toBe(1); // 피카츄 (전기 진화 10)
   });
 
   it('rolls a starter once and locks it', () => {
-    const s0 = defaultState();
-    const s1 = rollStarter(s0, () => 0); // deterministic → first species
+    const s1 = rollStarter(defaultState(), () => 0);
     expect(s1.locked).toBe(true);
     expect(s1.species).toBe('grass');
-    // re-roll does nothing
     const s2 = rollStarter(s1, () => 0.99);
-    expect(s2.species).toBe('grass');
+    expect(s2.species).toBe('grass'); // re-roll does nothing
   });
 });
 ```
 
-- [ ] **Step 2: 테스트 실패 확인**
+- [ ] **Step 5: store 테스트 실패 확인**
 
 Run: `npx vitest run test/store.test.js`
 Expected: FAIL — store.js 없음.
 
-- [ ] **Step 3: paths.js 구현**
+- [ ] **Step 6: paths.js 구현**
 
 ```js
 import { homedir } from 'node:os';
@@ -378,37 +477,53 @@ export const EVENTS_FILE = 'events.jsonl';
 export function dataDir() { return join(homedir(), '.pocketmon'); }
 ```
 
-- [ ] **Step 4: store.js 구현**
+- [ ] **Step 7: store.js 구현**
 
 ```js
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { SAVE_FILE } from './paths.js';
-import { ROSTER } from './roster.js';
+import { ROSTER, getSpeciesByKey, stageForLevel } from './roster.js';
+import { levelForXp } from './xp-engine.js';
+import { sign, verify } from './integrity.js';
 
 export function defaultState() {
   return {
     species: null, level: 1, xp: 0, stage: 0,
     dailyXp: 0, dailyDate: null, seenIds: [],
-    locked: false, rolledAt: null, lastActiveAt: null,
+    locked: false, rolledAt: null, lastActiveAt: null, lastSessionTs: 0,
   };
+}
+
+// level/stage는 저장 authority가 아니다 — 항상 xp에서 재계산.
+function recompute(state) {
+  const level = levelForXp(state.xp || 0);
+  const species = getSpeciesByKey(state.species);
+  const stage = species ? stageForLevel(species, level) : 0;
+  return { ...state, level, stage };
 }
 
 export function loadState(dir) {
   const file = join(dir, SAVE_FILE);
   if (!existsSync(file)) return defaultState();
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    return { ...defaultState(), ...parsed };
-  } catch {
+  const backupAndReset = () => {
     try { renameSync(file, file + '.bak'); } catch { /* ignore */ }
     return defaultState();
+  };
+  let parsed;
+  try { parsed = JSON.parse(readFileSync(file, 'utf8')); } catch { return backupAndReset(); }
+  // 서명 형식이 아니거나 검증 실패 → 조작/손상으로 간주해 초기화
+  if (!parsed || typeof parsed !== 'object' || !('data' in parsed) || !('sig' in parsed)) {
+    return backupAndReset();
   }
+  if (!verify(parsed.data, parsed.sig)) return backupAndReset();
+  return recompute({ ...defaultState(), ...parsed.data });
 }
 
 export function saveState(dir, state) {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, SAVE_FILE), JSON.stringify(state, null, 2));
+  const data = recompute(state);
+  writeFileSync(join(dir, SAVE_FILE), JSON.stringify({ data, sig: sign(data) }, null, 2));
 }
 
 export function rollStarter(state, rng = Math.random) {
@@ -418,15 +533,15 @@ export function rollStarter(state, rng = Math.random) {
 }
 ```
 
-- [ ] **Step 5: 테스트 통과 확인**
+- [ ] **Step 8: 테스트 통과 확인**
 
-Run: `npx vitest run test/store.test.js`
+Run: `npx vitest run test/integrity.test.js test/store.test.js`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add -A && git commit -m "feat: 세이브 저장소 + 1회성 영구 뽑기"
+git add -A && git commit -m "feat: 세이브 저장소 + 1회성 영구 뽑기 + HMAC 무결성(치팅 방지)"
 ```
 
 ---
@@ -519,14 +634,16 @@ git add -A && git commit -m "feat: 세션 로그 파서 (토큰 usage → XP 이
 
 **Interfaces:**
 - Consumes: `paths.js`의 `dataDir`, `EVENTS_FILE`.
+- Consumes: `paths.js`의 `dataDir`, `EVENTS_FILE`; `integrity.js`의 `sign`.
 - Produces:
-  - `hook/pocketmon-hook.js` — stdin으로 Claude Code hook JSON을 받아 `~/.pocketmon/events.jsonl`에 한 줄 append. `buildEvent(hookInput, now, rand) -> event|null`를 export해 테스트한다. `hook_event_name`이 `SessionStart`면 `sessionStart`, `PostToolUse`면 `toolUse` 이벤트 생성. id는 `session_id` + event 종류 + 카운터/랜덤으로 유일하게.
+  - `hook/pocketmon-hook.js` — stdin으로 Claude Code hook JSON을 받아 `~/.pocketmon/events.jsonl`에 한 줄 append. `buildEvent(hookInput, now, rand) -> event|null`를 export해 테스트한다. `hook_event_name`이 `SessionStart`면 `sessionStart`, `PostToolUse`면 `toolUse` 이벤트 생성. id는 `session_id` + event 종류 + 카운터/랜덤으로 유일하게. **이벤트에 HMAC `sig` 포함**(치팅 방지: 앱은 유효 서명 이벤트만 반영). `sig`는 `{id,kind,ts}`에 대한 서명.
 
 - [ ] **Step 1: 실패하는 테스트 작성** (`test/hook.test.js`)
 
 ```js
 import { describe, it, expect } from 'vitest';
 import { buildEvent } from '../hook/pocketmon-hook.js';
+import { verify } from '../src/core/integrity.js';
 
 describe('buildEvent', () => {
   it('maps SessionStart to sessionStart event', () => {
@@ -538,6 +655,11 @@ describe('buildEvent', () => {
   it('maps PostToolUse to toolUse event', () => {
     const e = buildEvent({ hook_event_name: 'PostToolUse', session_id: 's1' }, 2000, () => 0.5);
     expect(e.kind).toBe('toolUse');
+  });
+  it('signs the event so the app can verify it (anti-cheat)', () => {
+    const e = buildEvent({ hook_event_name: 'PostToolUse', session_id: 's1' }, 2000, () => 0.5);
+    expect(typeof e.sig).toBe('string');
+    expect(verify({ id: e.id, kind: e.kind, ts: e.ts }, e.sig)).toBe(true);
   });
   it('returns null for irrelevant events', () => {
     expect(buildEvent({ hook_event_name: 'Nope' }, 1, () => 0)).toBeNull();
@@ -556,6 +678,7 @@ Expected: FAIL — hook 모듈 없음.
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDir, EVENTS_FILE } from '../src/core/paths.js';
+import { sign } from '../src/core/integrity.js';
 
 const KIND = { SessionStart: 'sessionStart', PostToolUse: 'toolUse' };
 
@@ -563,7 +686,8 @@ export function buildEvent(input, now, rand = Math.random) {
   const kind = KIND[input?.hook_event_name];
   if (!kind) return null;
   const id = `${input.session_id || 'nosess'}:${kind}:${now}:${Math.floor(rand() * 1e9)}`;
-  return { id, kind, ts: now };
+  const core = { id, kind, ts: now };
+  return { ...core, sig: sign(core) }; // 앱이 검증할 서명(치팅 방지)
 }
 
 function main() {
@@ -858,7 +982,7 @@ Expected: PASS.
 
 - [ ] **Step 5: index.js + preload.js 구현 (Electron, 수동 확인)**
 
-`index.js`: `app.whenReady()`에서 `loadState(dataDir())` → `ensureStarter` → `saveState`. 투명 BrowserWindow(`transparent:true, frame:false, alwaysOnTop:true, resizable:false, skipTaskbar:true`) 생성해 `pet-window.html` 로드. `Tray`로 우클릭 메뉴(상태 보기 / 뽑기 연출 / 종료). `setInterval`로 tick 실행: `readEvents`는 events.jsonl 읽고 처리한 라인은 잘라내거나 offset 기록, `readSessionEvents`는 `~/.claude/projects/**/*.jsonl` 최근 파일 파싱. tick 결과를 `webContents.send('state', ...)`로 renderer에 전달하고 `saveState`. preload.js는 `contextBridge`로 `onState(cb)` 노출.
+`index.js`: `app.whenReady()`에서 `loadState(dataDir())` → `ensureStarter` → `saveState`. 투명 BrowserWindow(`transparent:true, frame:false, alwaysOnTop:true, resizable:false, skipTaskbar:true`) 생성해 `pet-window.html` 로드. `Tray`로 우클릭 메뉴(상태 보기 / 뽑기 연출 / 종료). `setInterval`로 tick 실행: `readEvents`는 events.jsonl을 읽어 각 줄을 JSON 파싱한 뒤 **`integrity.verify({id,kind,ts}, sig)`로 서명을 검증하고 유효한 이벤트만 반환**(가짜 append 무시 — 치팅 방지), 처리한 라인은 offset 기록/잘라냄. `readSessionEvents`는 `~/.claude/projects/**/*.jsonl` 최근 파일 파싱(세션 로그는 Claude Code 자신이 쓴 권위 소스라 서명 불필요). tick 결과를 `webContents.send('state', ...)`로 renderer에 전달하고 `saveState`. preload.js는 `contextBridge`로 `onState(cb)` 노출.
 
 ```js
 // preload.js
@@ -1001,11 +1125,20 @@ git add -A && git commit -m "feat: 렌더러 펫 창 (애니메이션/상호작�
 Run: `npm start`
 Expected: 투명 창에 8비트 포켓몬 1마리 표시(최초 실행 시 랜덤 지정), 트레이 아이콘 등장.
 
-- [ ] **Step 2: XP 유입 확인**
+- [ ] **Step 2: XP 유입 확인 (정상 경로)**
 
-수동: `~/.pocketmon/events.jsonl`에 `{"id":"t1","kind":"tokens","tokens":300000,"ts":1}` 한 줄 추가 → 다음 tick에 레벨업/진화 연출이 뜨는지 확인.
+수동: hook 스크립트를 직접 여러 번 실행해 서명된 이벤트를 생성한다:
+`echo '{"hook_event_name":"PostToolUse","session_id":"manual"}' | node hook/pocketmon-hook.js`
+→ 다음 tick에 펫이 반응하고 XP가 오르는지 확인. (Claude Code에서 실제 코딩해도 동일.)
 
-- [ ] **Step 3: 재설치 유지 확인**
+- [ ] **Step 3: 치팅 방지 확인**
+
+수동: (a) `~/.pocketmon/events.jsonl`에 서명 없는 가짜 줄
+`{"id":"x","kind":"tokens","tokens":999999,"ts":1}`을 손으로 추가 → 다음 tick에
+**무시되어 XP 변화 없음** 확인. (b) `~/.pocketmon/save.json`의 `data.xp`를 큰 값으로
+편집 → 앱 재시작 시 **서명 불일치로 초기화**(진행도 리셋)되는지 확인.
+
+- [ ] **Step 4: 재설치 유지 확인**
 
 수동: 앱 종료 후 재실행 → 같은 포켓몬·레벨 유지. `~/.pocketmon/save.json` 존재 확인.
 

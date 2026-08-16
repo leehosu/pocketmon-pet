@@ -91,6 +91,25 @@ Claude Code ──hook──> ~/.pocketmon/events.jsonl ─┐
 - 이후 "뽑기"는 연출만 재생하고 항상 잠긴 스타터를 반환(재추첨 불가).
 - 초기화: 사용자가 `~/.pocketmon/save.json`을 직접 삭제해야 함.
 
+## 무결성 / 치팅 방지 (tamper-evident)
+
+로컬 데스크톱 앱은 세이브 파일이 사용자 디스크에 있어 "절대 조작 불가"를
+물리적으로 보장할 수 없다(완전 방지는 서버 권위 계산이 필요 — 다음 버전).
+대신 **조작하면 감지되어 무효화되는(tamper-evident)** 가장 강한 로컬 방어를 둔다.
+
+1. **레벨·진화단계는 저장 authority가 아니다** — 항상 XP에서 재계산
+   (`levelForXp`, `stageForLevel`). 로드 시에도 재계산해 저장된 값을 덮어쓴다.
+   → save 파일의 `level`/`stage`를 고쳐도 무시됨(독립 조작 불가).
+2. **XP는 실제 Claude Code 세션 로그에서만 파생** + 이벤트 id dedup + 일일 상한.
+   XP를 직접 설정하는 메뉴/API는 존재하지 않는다.
+3. **save.json HMAC 서명** — `{ data, sig }` 형태로 저장. 로드 시 서명 검증,
+   불일치(수기 편집)면 조작으로 간주해 **안전 초기화**(defaultState, 재추첨).
+   조작 시 진행도 손실이 억지력이 된다.
+4. **hook 이벤트 서명** — 각 이벤트에 HMAC `sig` 포함. 앱은 서명이 유효한
+   이벤트만 XP·반응에 반영. `events.jsonl`에 손으로 가짜 줄을 넣어도 무시.
+5. HMAC 비밀키는 앱/훅에 내장(로컬 앱 특성상 추출 가능 — 난독화 수준의
+   억지력이며 완전 비밀은 아님을 명시). 키는 `src/core/integrity.js` 한 곳에서 관리.
+
 ## 에러 처리
 
 - `events.jsonl` / `save.json` 손상 시: 파싱 실패 라인은 스킵, save 손상 시
