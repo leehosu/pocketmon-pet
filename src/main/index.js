@@ -10,6 +10,7 @@ import https from 'node:https';
 
 import { dataDir, EVENTS_FILE } from '../core/paths.js';
 import { verify } from '../core/integrity.js';
+import { getSecret } from '../core/secret.js';
 import { loadState, saveState, rollStarter } from '../core/store.js';
 import { getSpeciesByKey, canEvolve } from '../core/roster.js';
 import { parseSessionLines } from '../core/session-parser.js';
@@ -114,7 +115,7 @@ function readEvents() {
     try { obj = JSON.parse(line); } catch { continue; }
     if (!obj || typeof obj !== 'object') continue;
     const { id, kind, ts, sig } = obj;
-    if (!verify({ id, kind, ts }, sig)) continue; // 서명 검증 실패 → 위조/조작 간주, 버림
+    if (!verify({ id, kind, ts }, sig, getSecret(dataDir()))) continue; // 서명 실패 → 위조/조작 간주, 버림
     out.push({ id, kind, ts });
   }
   return out;

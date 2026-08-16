@@ -4,6 +4,7 @@ import { SAVE_FILE } from './paths.js';
 import { ROSTER, getSpeciesByKey, stageForLevel } from './roster.js';
 import { levelForXp } from './xp-engine.js';
 import { sign, verify } from './integrity.js';
+import { getSecret } from './secret.js';
 
 export function defaultState() {
   return {
@@ -38,14 +39,14 @@ export function loadState(dir) {
   if (!parsed || typeof parsed !== 'object' || !('data' in parsed) || !('sig' in parsed)) {
     return backupAndReset();
   }
-  if (!verify(parsed.data, parsed.sig)) return backupAndReset();
+  if (!verify(parsed.data, parsed.sig, getSecret(dir))) return backupAndReset();
   return recompute({ ...defaultState(), ...parsed.data });
 }
 
 export function saveState(dir, state) {
   mkdirSync(dir, { recursive: true });
   const data = recompute(state);
-  writeFileSync(join(dir, SAVE_FILE), JSON.stringify({ data, sig: sign(data) }, null, 2));
+  writeFileSync(join(dir, SAVE_FILE), JSON.stringify({ data, sig: sign(data, getSecret(dir)) }, null, 2));
 }
 
 export function rollStarter(state, rng = Math.random) {
