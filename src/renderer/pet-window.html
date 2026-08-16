@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>
+  html,body{margin:0;background:transparent;overflow:hidden;-webkit-app-region:drag;}
+  body{width:96px;height:96px;position:relative;}
+  canvas{image-rendering:pixelated;position:absolute;top:0;left:0;}
+  #pop{
+    position:absolute;top:2px;left:0;width:96px;text-align:center;
+    font:bold 11px monospace;color:#fff;text-shadow:0 0 2px #000,0 0 2px #000;
+    pointer-events:none;opacity:0;transition:opacity .2s ease;
+  }
+  #hud{
+    position:absolute;left:0;bottom:0;width:96px;
+    display:flex;flex-direction:column;align-items:center;gap:2px;
+    padding-bottom:2px;
+    opacity:0;transition:opacity .15s ease;
+    -webkit-app-region:no-drag;
+    pointer-events:none;
+  }
+  #xp-bar{
+    width:84px;height:5px;background:rgba(0,0,0,.5);border:1px solid #0f0f0f;
+  }
+  #xp-fill{
+    height:100%;width:0%;background:#f8c838;transition:width .3s ease;
+  }
+  #status{
+    font:9px monospace;color:#fff;text-shadow:0 0 2px #000,0 0 2px #000;
+    white-space:nowrap;
+  }
+</style></head>
+<body>
+  <canvas id="pet" width="96" height="96"></canvas>
+  <div id="pop"></div>
+  <div id="hud">
+    <div id="xp-bar"><div id="xp-fill"></div></div>
+    <div id="status"></div>
+  </div>
+  <script type="module" src="./pet-window.js"></script>
+</body>
+</html>
