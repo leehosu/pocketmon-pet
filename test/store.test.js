@@ -42,14 +42,19 @@ describe('store', () => {
     expect(loaded.locked).toBe(false);
   });
 
-  it('recomputes level/stage from xp even if stored values are forged', () => {
-    // valid signature but we saved via saveState which recomputes anyway;
-    // simulate by saving a state whose level field is wrong before signing
-    const s = { ...defaultState(), species: 'electric', xp: xpForLevel(10), level: 1, stage: 0, locked: true };
+  it('recomputes level from xp; does NOT auto-advance stage (manual evolution)', () => {
+    const s = { ...defaultState(), species: 'electric', xp: xpForLevel(10), level: 1, stage: 0, locked: true, hatched: true };
     saveState(dir, s);
     const loaded = loadState(dir);
     expect(loaded.level).toBe(10);
-    expect(loaded.stage).toBe(1); // 피카츄 (전기 진화 10)
+    expect(loaded.stage).toBe(0); // 진화 가능하지만 자동으로 오르지 않음("!" 클릭 필요)
+  });
+
+  it('clamps a forged too-high stage down to level max (anti-cheat)', () => {
+    const s = { ...defaultState(), species: 'electric', xp: 0, level: 1, stage: 2, locked: true, hatched: true };
+    saveState(dir, s);
+    const loaded = loadState(dir);
+    expect(loaded.stage).toBe(0); // level 1은 stage 0까지만 허용 → clamp
   });
 
   it('resets when save file is a legacy/unwrapped shape (no data/sig) — anti-cheat', () => {

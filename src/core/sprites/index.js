@@ -309,13 +309,33 @@ const IDLE_BASE = {
 };
 // ▲▲▲ 12칸 모두 채움(빈 칸 없음) ▲▲▲
 
+// 부화 전 "알" — 어떤 포켓몬인지 알 수 없는 상태. 크림색 오리지널 도트(갈색 점).
+const EGG_BASE = [
+  mrow(), mrow(), mrow(),
+  row(4, 2),
+  row(6, 2),
+  paint(row(6, 2), [[6, 9]]),
+  row(8, 2),
+  paint(row(8, 2), [[5, 9], [10, 9]]),
+  row(10, 2),
+  paint(row(10, 2), [[6, 9]]),
+  row(10, 2),
+  paint(row(10, 2), [[9, 9]]),
+  row(8, 2),
+  row(6, 2),
+  mrow(), mrow(),
+];
+
 export const SPRITES = Object.fromEntries(
   ROSTER.map((s) => [s.key,
     IDLE_BASE[s.key].map((base) => buildStage(base, SPARK[s.key])),
   ]),
 );
+// 알은 1단계짜리 특수 스프라이트(로스터 밖).
+SPRITES.egg = [buildStage(EGG_BASE, 2)];
 
 export function getFrames(species, stage, anim) {
-  const set = SPRITES[species][stage];
+  const set = SPRITES[species] && SPRITES[species][stage];
+  if (!set) return SPRITES.egg[0].idle; // 알 수 없는 종 → 알 프레임으로 폴백
   return set[anim] || set.idle;
 }

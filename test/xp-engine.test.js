@@ -46,13 +46,18 @@ describe('applyEvents', () => {
       [{ id: 'x', kind: 'toolUse', ts: 1 }], { today: '2026-08-16' });
     expect(state.dailyXp).toBe(XP_RULES.perToolUse);
   });
-  it('detects level up and evolution', () => {
-    const s = { ...base(), xp: xpForLevel(9) };
+  it('levels up but does NOT auto-evolve (evolution is manual via "!")', () => {
+    const s = { ...base(), xp: xpForLevel(9) }; // stage 0
     const { state, changes } = applyEvents(s,
       [{ id: 'big', kind: 'tokens', tokens: 462000, ts: 1 }], { today: '2026-08-16' });
-    expect(state.level).toBe(10);
+    expect(state.level).toBe(10);        // 전기 진화 가능 레벨 도달
     expect(changes.leveledUp).toBe(true);
-    expect(state.stage).toBe(1);      // 피카츄
-    expect(changes.evolved).toBe(true);
+    expect(state.stage).toBe(0);         // 그러나 stage는 자동으로 오르지 않음(수동 진화)
+    expect(changes.evolved).toBe(false);
+  });
+  it('clamps a forged too-high stage down to what the level allows', () => {
+    const s = { ...base(), xp: 0, stage: 2 }; // level 1인데 stage 2로 조작
+    const { state } = applyEvents(s, [], { today: '2026-08-16' });
+    expect(state.stage).toBe(0);         // 레벨1 전기는 stage 0까지만 허용 → clamp
   });
 });

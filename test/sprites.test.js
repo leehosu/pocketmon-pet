@@ -36,11 +36,11 @@ describe('sprites', () => {
       }
     });
   });
-  // 실제로 서로 다른 도트인지 강제 (placeholder 동일 스프라이트 금지)
+  // 실제로 서로 다른 도트인지 강제 (placeholder 동일 스프라이트 금지) — 로스터 12종 기준(알 제외)
   it('idle base frame differs across all 12 species+stage sprites', () => {
     const seen = new Set();
-    for (const key of Object.keys(SPRITES)) {
-      for (const stage of SPRITES[key]) {
+    for (const s of ROSTER) {
+      for (const stage of SPRITES[s.key]) {
         const sig = JSON.stringify(stage.idle[0]);
         expect(seen.has(sig)).toBe(false); // 중복 금지
         seen.add(sig);
@@ -51,5 +51,10 @@ describe('sprites', () => {
   it('getFrames returns frames and falls back to idle for unknown anim', () => {
     expect(getFrames('electric', 0, 'run').length).toBeGreaterThanOrEqual(2);
     expect(getFrames('electric', 0, 'nope')).toEqual(getFrames('electric', 0, 'idle'));
+  });
+  it('has an egg sprite for the pre-hatch state', () => {
+    expect(getFrames('egg', 0, 'idle').length).toBeGreaterThanOrEqual(1);
+    // 알 수 없는 종은 알 프레임으로 안전 폴백
+    expect(getFrames('unknownkey', 0, 'idle').length).toBeGreaterThanOrEqual(1);
   });
 });

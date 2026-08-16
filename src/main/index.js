@@ -10,7 +10,8 @@ import https from 'node:https';
 
 import { dataDir, EVENTS_FILE } from '../core/paths.js';
 import { verify } from '../core/integrity.js';
-import { loadState, saveState } from '../core/store.js';
+import { loadState, saveState, rollStarter } from '../core/store.js';
+import { getSpeciesByKey, canEvolve } from '../core/roster.js';
 import { parseSessionLines } from '../core/session-parser.js';
 import { tick, ensureStarter } from './orchestrator.js';
 import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
@@ -331,6 +332,16 @@ function createWindow() {
   mainWindow.loadFile(join(__dirname, '../renderer/pet-window.html'));
 }
 
+// 부화/진화 등 상태 변화를 즉시 렌더러에 알림(다음 tick을 기다리지 않고).
+function broadcastState(changes) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('state', {
+    state,
+    changes: { leveledUp: false, evolved: false, xpGained: 0, reactions: 0, ...changes },
+    activity: { busy: Boolean(state?.busy), skillPulse: false },
+  });
+}
+
 function sendMenuCommand(command) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.show();
@@ -364,12 +375,13 @@ app.whenReady().then(() => {
 
   const dir = dataDir();
   eventsOffset = loadOffset(); // 영속된 오프셋부터 재개(재시작 시 전체 replay 방지)
-  state = ensureStarter(loadState(dir), Math.random);
+  // 최초엔 알 상태(자동 뽑기 없음). 종은 부화("!" 클릭) 시에만 랜덤 결정된다.
+  state = loadState(dir);
   state = { ...state, busy: false }; // 재시작 잔여 busy 무시
   saveState(dir, state);
 
-  // 현재 종의 실제 포켓몬 스프라이트를 공개 PokéAPI에서 런타임 캐시(없을 때만, 비동기).
-  fetchSpeciesSprites(state.species);
+  // 이미 부화한 경우에만 실제 스프라이트를 PokéAPI에서 캐시(없을 때만, 비동기).
+  if (state.hatched && state.species) fetchSpeciesSprites(state.species);
 
   // 렌더러의 수동 드래그 → 창 이동. 네이티브 -webkit-app-region:drag 대신 이 경로를 쓴다
   // (그래야 캔버스 클릭=핀 토글이 드래그 히트테스트에 먹히지 않는다).
@@ -392,6 +404,27 @@ app.whenReady().then(() => {
 
   // 기술 선택 → 현재 디스플레이 전체를 덮는 투명·클릭통과 오버레이 창에서 이펙트 재생.
   ipcMain.on('pkmn:play-skill', (_e, effect) => playSkillEffect(effect));
+
+  // 부화: 알("!" 클릭) → 종을 랜덤 결정(rollStarter, Math.random)하고 hatched=true.
+  // 종은 이 순간에만 정해지므로 미리 알 수 없고, 결과는 서명 저장되어 편집 시 리셋된다.
+  ipcMain.on('pkmn:hatch', () => {
+    if (!state || state.hatched) return;
+    state = rollStarter(state, Math.random); // species 결정 + locked
+    state = { ...state, hatched: true };
+    saveState(dataDir(), state);
+    fetchSpeciesSprites(state.species); // 부화한 종의 실제 스프라이트 받기
+    broadcastState({ hatched: true });
+  });
+
+  // 진화: 레벨이 허용할 때만("!" 클릭) stage +1. 자동 진화 아님.
+  ipcMain.on('pkmn:evolve', () => {
+    if (!state || !state.hatched) return;
+    if (!canEvolve(getSpeciesByKey(state.species), state.level, state.stage)) return;
+    state = { ...state, stage: (state.stage || 0) + 1 };
+    saveState(dataDir(), state);
+    fetchSpeciesSprites(state.species); // 새 단계 스프라이트 보장
+    broadcastState({ evolved: true });
+  });
 
   createWindow();
   createTray();

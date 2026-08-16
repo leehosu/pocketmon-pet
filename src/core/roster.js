@@ -20,3 +20,10 @@ export function stageForLevel(species, level) {
   if (level >= e1) return 1;
   return 0;
 }
+
+// 현재 레벨이 다음 진화를 허용하고(현재 stage보다 높음) 아직 그 단계가 아니면 true.
+// 진화는 자동이 아니라 이 값이 true일 때 "!"를 띄우고 사용자가 클릭해야 일어난다.
+export function canEvolve(species, level, stage) {
+  if (!species) return false;
+  return (stage || 0) < stageForLevel(species, level);
+}
