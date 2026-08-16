@@ -31,7 +31,8 @@ const EFFECT_TYPES = [
   'fire', 'fire_breath',
   'water', 'water_bubbles',
   'electric', 'electric_bolts',
-  'hatch', // 부화 연출(화면 전체)
+  'hatch',  // 부화 연출(화면 전체)
+  'evolve', // 진화 연출(화면 전체)
 ];
 const DRIFT_STEP_BUSY = 6; // 프롬프트 처리중(달리기) — 크게 움직임
 const DRIFT_STEP_IDLE = 1; // 평상시 — 가끔 조금만 움직임
@@ -425,6 +426,7 @@ app.whenReady().then(() => {
     state = { ...state, stage: (state.stage || 0) + 1 };
     saveState(dataDir(), state);
     fetchSpeciesSprites(state.species); // 새 단계 스프라이트 보장
+    playSkillEffect('evolve');          // 화면 전체 진화 연출
     broadcastState({ evolved: true });
   });
 

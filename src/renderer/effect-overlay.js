@@ -77,6 +77,13 @@
         ang: rand(0, TAU), speed: rand(120, 460), size: rand(3, 9),
         c: pick(['#ffffff', '#f8c838', '#fff27a']), spin: rand(-6, 6), delay: rand(0, 0.45),
       });
+    } else if (effect === 'evolve') {
+      // 진화: 바깥에서 중앙으로 모여드는 에너지(수렴) + 이후 폭발용 별
+      for (let i = 0; i < 70; i++) parts.push({
+        ang: rand(0, TAU), r0: rand(Math.min(W, H) * 0.25, Math.max(W, H) * 0.6),
+        size: rand(2, 6), c: pick(['#ffffff', '#7ac6ff', '#f8c838', '#fff27a']),
+        spin: rand(-6, 6), delay: rand(0, 0.3),
+      });
     }
     // electric_bolts는 프레임 루프에서 동적으로 큰 볼트 + 화면 번쩍 생성
   }
@@ -295,6 +302,53 @@
         ctx.rotate(age * p.spin);
         ctx.fillStyle = p.c;
         const s = p.size;
+        ctx.beginPath();
+        ctx.moveTo(0, -s); ctx.lineTo(s * 0.3, -s * 0.3); ctx.lineTo(s, 0); ctx.lineTo(s * 0.3, s * 0.3);
+        ctx.lineTo(0, s); ctx.lineTo(-s * 0.3, s * 0.3); ctx.lineTo(-s, 0); ctx.lineTo(-s * 0.3, -s * 0.3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    } else if (effect === 'evolve') {
+      const cx = W / 2, cy = H / 2;
+      // 1) 수렴 (0~1.1s): 바깥의 에너지가 중앙으로 모임
+      const conv = Math.min(1, nowT / 1.1);
+      for (const p of parts) {
+        const age = nowT - p.delay;
+        if (age < 0) continue;
+        if (nowT < 1.1) {
+          const r = p.r0 * (1 - conv);
+          const x = cx + Math.cos(p.ang) * r;
+          const y = cy + Math.sin(p.ang) * r;
+          ctx.globalAlpha = alpha * (0.4 + 0.6 * conv);
+          ctx.strokeStyle = p.c;
+          ctx.lineWidth = p.size * 0.6;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(cx + Math.cos(p.ang) * (r + 14), cy + Math.sin(p.ang) * (r + 14));
+          ctx.stroke();
+        }
+      }
+      // 2) 플래시 (1.05~1.55s): 흰 화면 피크
+      if (nowT > 1.05 && nowT < 1.55) {
+        const fp = 1 - Math.abs((nowT - 1.3) / 0.25); // 1.3s에서 최대
+        ctx.globalAlpha = Math.max(0, fp) * alpha;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, W, H);
+      }
+      // 3) 폭발 별 (1.4s~): 중앙에서 바깥으로 + 페이드
+      for (const p of parts) {
+        const age = nowT - 1.4 - p.delay;
+        if (age < 0) continue;
+        const d = (p.r0 * 0.5 + 80) * age;
+        const x = cx + Math.cos(p.ang) * d;
+        const y = cy + Math.sin(p.ang) * d;
+        ctx.save();
+        ctx.globalAlpha = alpha * Math.max(0, 1 - age / 1.1);
+        ctx.translate(x, y);
+        ctx.rotate(age * p.spin);
+        ctx.fillStyle = p.c;
+        const s = p.size + 2;
         ctx.beginPath();
         ctx.moveTo(0, -s); ctx.lineTo(s * 0.3, -s * 0.3); ctx.lineTo(s, 0); ctx.lineTo(s * 0.3, s * 0.3);
         ctx.lineTo(0, s); ctx.lineTo(-s * 0.3, s * 0.3); ctx.lineTo(-s, 0); ctx.lineTo(-s * 0.3, -s * 0.3);
