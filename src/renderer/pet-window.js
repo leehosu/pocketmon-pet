@@ -25,6 +25,20 @@ export function hudVisible({ hovering, pinned }) {
   return Boolean(hovering || pinned);
 }
 
+// 타입별 오리지널 기술 목록(공식 포켓몬 기술 아님). 각 기술은 이름 + 화면 이펙트 종류.
+const SKILLS_BY_KEY = {
+  grass: [{ name: '잎 흩날리기', effect: 'leaf' }, { name: '새싹 회오리', effect: 'leaf' }],
+  fire: [{ name: '불꽃 튀기기', effect: 'fire' }, { name: '화염 숨결', effect: 'fire' }],
+  water: [{ name: '물보라', effect: 'water' }, { name: '거품 세례', effect: 'water' }],
+  electric: [{ name: '스파크', effect: 'electric' }, { name: '번개 방출', effect: 'electric' }],
+};
+
+// species(getSpeciesByKey 결과)에 맞는 기술 배열 반환. 없으면 빈 배열.
+export function skillsFor(species) {
+  if (!species || !species.key) return [];
+  return SKILLS_BY_KEY[species.key] || [];
+}
+
 // 더블클릭 상세 패널용 값 계산(순수). species는 getSpeciesByKey 결과(없으면 undefined).
 export function statusDetail(state, species, xpFor, dailyCap) {
   const level = state.level || 1;
@@ -196,7 +210,12 @@ if (typeof window !== 'undefined') {
     if (!detailOpen) { detailEl.style.opacity = '0'; return; }
     const state = latest && latest.state;
     if (!state) return;
-    const d = statusDetail(state, getSpeciesByKey(state.species), xpForLevel, XP_RULES.dailyCap);
+    const species = getSpeciesByKey(state.species);
+    const d = statusDetail(state, species, xpForLevel, XP_RULES.dailyCap);
+    const skills = skillsFor(species);
+    const skillBtns = skills
+      .map((s) => `<button class="skill-btn" data-effect="${s.effect}">${s.name}</button>`)
+      .join('');
     detailEl.innerHTML = [
       `<div class="d-name">${d.name}</div>`,
       `<div class="d-row"><span>타입</span><b>${d.type}</b></div>`,
@@ -207,6 +226,8 @@ if (typeof window !== 'undefined') {
       `<div class="d-row"><span>총 경험치</span><b>${d.totalXp} XP</b></div>`,
       `<div class="d-row"><span>진화</span><b>${d.evolveText}</b></div>`,
       `<div class="d-row"><span>오늘 획득</span><b>${d.dailyXp}/${d.dailyCap} XP</b></div>`,
+      `<div class="d-skills-label">기술 (클릭 → 화면 이펙트)</div>`,
+      `<div class="d-skills">${skillBtns}</div>`,
     ].join('');
     detailEl.style.opacity = '1';
   }
@@ -273,6 +294,16 @@ if (typeof window !== 'undefined') {
         pinned = !pinned; // 단일 클릭 → 기본 HUD 핀 토글
         updateHud();
       }, DBLCLICK_MS);
+    }
+  });
+
+  // 기술 버튼(상세 패널 내부) 클릭 → 화면 전체 이펙트 재생(메인이 오버레이 창 생성).
+  // 위임 방식: renderDetail이 innerHTML을 갱신해도 리스너가 유지된다.
+  detailEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-effect]');
+    if (!btn) return;
+    if (window.pkmn && typeof window.pkmn.playSkill === 'function') {
+      window.pkmn.playSkill(btn.dataset.effect);
     }
   });
 

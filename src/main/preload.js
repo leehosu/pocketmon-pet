@@ -4,4 +4,5 @@ contextBridge.exposeInMainWorld('pkmn', {
   onState: (cb) => ipcRenderer.on('state', (_e, payload) => cb(payload)),
   moveWindowBy: (dx, dy) => ipcRenderer.send('pkmn:move-window', { dx, dy }),
   setDetail: (open) => ipcRenderer.send('pkmn:set-detail', !!open),
+  playSkill: (effect) => ipcRenderer.send('pkmn:play-skill', String(effect)),
 });
