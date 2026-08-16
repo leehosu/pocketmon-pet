@@ -180,6 +180,7 @@ if (typeof window !== 'undefined') {
 
     if (command === 'showStatus') {
       pinned = true;
+      setDetailOpen(true); // 메뉴바 "상태 보기" → 상세 패널 확실히 열기(더블클릭 대체 경로)
     } else if (command === 'replayIntro') {
       triggerReact('첫 만남!');
     }
@@ -232,14 +233,16 @@ if (typeof window !== 'undefined') {
     detailEl.style.opacity = '1';
   }
 
-  function toggleDetail() {
-    detailOpen = !detailOpen;
+  function setDetailOpen(open) {
+    detailOpen = open;
     // 메인에 창 크기 변경 요청(상세 패널을 담기 위해 확장 / 닫으면 원복)
     if (window.pkmn && typeof window.pkmn.setDetail === 'function') {
       window.pkmn.setDetail(detailOpen);
     }
     renderDetail();
   }
+
+  function toggleDetail() { setDetailOpen(!detailOpen); }
 
   canvas.addEventListener('mouseenter', () => { hovering = true; updateHud(); });
   canvas.addEventListener('mouseleave', () => { hovering = false; updateHud(); });
@@ -272,9 +275,10 @@ if (typeof window !== 'undefined') {
     }
   });
 
-  // 클릭/더블클릭 구분: 단일 클릭 = 기본 HUD 핀 토글, 더블클릭 = 상세 패널 토글.
-  // 첫 클릭은 DBLCLICK_MS 동안 보류했다가, 그 안에 두 번째 클릭이 오면 더블클릭으로 처리한다.
-  const DBLCLICK_MS = 250;
+  // 단일 클릭 = 기본 HUD 핀 토글 / 더블클릭 = 상세 패널 토글.
+  // 더블클릭은 브라우저 네이티브 dblclick 이벤트로 판별(수동 타이머보다 트랙패드에서 안정적).
+  // 단일 클릭은 잠깐 보류했다가, 그 사이 dblclick이 오면 취소해 핀 토글이 안 튀게 한다.
+  const DBLCLICK_MS = 280;
   let clickTimer = null;
 
   window.addEventListener('mouseup', () => {
@@ -282,19 +286,19 @@ if (typeof window !== 'undefined') {
     dragging = false;
     canvas.style.cursor = 'grab';
     if (movedTotal >= CLICK_THRESHOLD_PX) return; // 드래그였음 → 클릭 아님
-
-    if (clickTimer) {
-      // 두 번째 클릭 → 더블클릭
-      clearTimeout(clickTimer);
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => {
       clickTimer = null;
-      toggleDetail();
-    } else {
-      clickTimer = setTimeout(() => {
-        clickTimer = null;
-        pinned = !pinned; // 단일 클릭 → 기본 HUD 핀 토글
-        updateHud();
-      }, DBLCLICK_MS);
-    }
+      pinned = !pinned; // 단일 클릭 → 기본 HUD 핀 토글
+      updateHud();
+    }, DBLCLICK_MS);
+  });
+
+  // 네이티브 더블클릭 → 대기 중인 단일클릭(핀) 취소 후 상세 패널 토글.
+  canvas.addEventListener('dblclick', () => {
+    clearTimeout(clickTimer);
+    clickTimer = null;
+    toggleDetail();
   });
 
   // 기술 버튼(상세 패널 내부) 클릭 → 화면 전체 이펙트 재생(메인이 오버레이 창 생성).
