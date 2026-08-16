@@ -240,7 +240,7 @@ if (typeof window !== 'undefined') {
     xpFillEl.style.width = `${Math.round(progress * 100)}%`;
 
     const name = species ? species.stages[state.stage]?.name || species.key : '???';
-    statusEl.textContent = `${name} Lv.${level} (${state.stage + 1}/3단계)`;
+    statusEl.textContent = `${name} Lv.${level}`;
   }
 
   function updateHud() {
