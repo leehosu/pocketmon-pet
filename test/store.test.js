@@ -15,7 +15,7 @@ describe('store', () => {
     expect(s.level).toBe(1);
   });
 
-  it('round-trips save/load (signed)', () => {
+  it('round-trips save/load (plain JSON)', () => {
     const s = { ...defaultState(), species: 'fire', xp: xpForLevel(5), locked: true };
     saveState(dir, s);
     const loaded = loadState(dir);
@@ -28,18 +28,6 @@ describe('store', () => {
     const s = loadState(dir);
     expect(s.level).toBe(1);
     expect(existsSync(join(dir, 'save.json.bak'))).toBe(true);
-  });
-
-  it('rejects a hand-tampered save and resets (anti-cheat)', () => {
-    const s = { ...defaultState(), species: 'electric', xp: 100, locked: true };
-    saveState(dir, s);
-    // attacker edits xp to 999999 in the data block, keeping old sig
-    const raw = JSON.parse(readFileSync(join(dir, 'save.json'), 'utf8'));
-    raw.data.xp = 999999;
-    writeFileSync(join(dir, 'save.json'), JSON.stringify(raw));
-    const loaded = loadState(dir);
-    expect(loaded.xp).toBe(0);      // reset, cheat rejected
-    expect(loaded.locked).toBe(false);
   });
 
   it('recomputes level from xp; does NOT auto-advance stage (manual evolution)', () => {
@@ -57,15 +45,6 @@ describe('store', () => {
     expect(loaded.stage).toBe(0); // level 1은 stage 0까지만 허용 → clamp
   });
 
-  it('resets when save file is a legacy/unwrapped shape (no data/sig) — anti-cheat', () => {
-    // 공격자/구버전이 서명 래퍼 없이 raw 상태를 써넣음
-    writeFileSync(join(dir, 'save.json'), JSON.stringify({ xp: 999999, species: 'fire', locked: true }));
-    const loaded = loadState(dir);
-    expect(loaded.xp).toBe(0);        // 무시하고 초기화
-    expect(loaded.locked).toBe(false);
-    expect(loaded.species).toBe(null);
-    expect(existsSync(join(dir, 'save.json.bak'))).toBe(true); // 손상본 백업
-  });
 
   it('rolls a starter once and locks it', () => {
     const s1 = rollStarter(defaultState(), () => 0);
