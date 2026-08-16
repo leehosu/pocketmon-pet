@@ -21,6 +21,23 @@ export function nextFrameIndex({ tickCount, frameCount }) {
   return tickCount % frameCount;
 }
 
+// 정지 이미지(커스텀/PokéAPI 스프라이트)에 입힐 모션 변형(순수). anim별로 다른 움직임.
+// dx/dy=이동(px), rot=회전(rad), sx/sy=스케일.
+export function spriteMotion(anim, tick) {
+  const t = tick;
+  switch (anim) {
+    case 'run':   // 통통 뛰기(위로만) + 살짝 기울임
+      return { dx: 0, dy: -Math.abs(Math.sin(t * 0.9)) * 6, rot: Math.sin(t * 0.9) * 0.06, sx: 1, sy: 1 };
+    case 'walk':  // 뒤뚱뒤뚱(가벼운 상하 + 좌우 흔들림)
+      return { dx: Math.sin(t * 0.7) * 1.5, dy: Math.sin(t * 0.7) * 2, rot: Math.sin(t * 0.7) * 0.06, sx: 1, sy: 1 };
+    case 'skill': // 기술: 팝(확대) + 좌우 진동
+      return { dx: Math.sin(t * 4) * 3, dy: -Math.abs(Math.sin(t * 2)) * 4, rot: 0, sx: 1.08, sy: 1.08 };
+    case 'idle':
+    default:      // 숨쉬기: 잔잔한 상하 바운스
+      return { dx: 0, dy: Math.sin(t * 0.4) * 2, rot: 0, sx: 1, sy: 1 };
+  }
+}
+
 export function hudVisible({ hovering, pinned }) {
   return Boolean(hovering || pinned);
 }
@@ -341,9 +358,16 @@ if (typeof window !== 'undefined') {
       const customImg = customKey ? customImages.get(customKey) : null;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (customImg && customImg.complete && customImg.naturalWidth > 0) {
-        // 사용자 제공 PNG를 그대로 캔버스 크기에 맞춰 그린다(코드 도트 매트릭스 대신).
+        // 사용자/PokéAPI PNG는 정지 이미지라, anim별 모션 변형(바운스·뒤뚱·팝)을 입혀 그린다.
+        const m = spriteMotion(currentAnim, tickCount);
+        const cw = canvas.width, ch = canvas.height;
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(customImg, 0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.translate(cw / 2 + m.dx, ch / 2 + m.dy);
+        ctx.rotate(m.rot);
+        ctx.scale(m.sx, m.sy);
+        ctx.drawImage(customImg, -cw / 2, -ch / 2, cw, ch);
+        ctx.restore();
       } else {
         // 커스텀 이미지가 없거나(파일 없음) 아직 로드 실패/미완료 → 기존 코드 도트 폴백.
         const frames = getFrames(species, stage, currentAnim);
