@@ -636,7 +636,7 @@ git add -A && git commit -m "feat: 세션 로그 파서 (토큰 usage → XP 이
 - Consumes: `paths.js`의 `dataDir`, `EVENTS_FILE`.
 - Consumes: `paths.js`의 `dataDir`, `EVENTS_FILE`; `integrity.js`의 `sign`.
 - Produces:
-  - `hook/pocketmon-hook.js` — stdin으로 Claude Code hook JSON을 받아 `~/.pocketmon/events.jsonl`에 한 줄 append. `buildEvent(hookInput, now, rand) -> event|null`를 export해 테스트한다. `hook_event_name`이 `SessionStart`면 `sessionStart`, `PostToolUse`면 `toolUse` 이벤트 생성. id는 `session_id` + event 종류 + 카운터/랜덤으로 유일하게. **이벤트에 HMAC `sig` 포함**(치팅 방지: 앱은 유효 서명 이벤트만 반영). `sig`는 `{id,kind,ts}`에 대한 서명.
+  - `hook/pocketmon-hook.js` — stdin으로 Claude Code hook JSON을 받아 `~/.pocketmon/events.jsonl`에 한 줄 append. `buildEvent(hookInput, now, rand) -> event|null`를 export해 테스트한다. hook_event_name 매핑(활동 감지 포함): `SessionStart`→`sessionStart`, `PostToolUse`→`toolUse`, `UserPromptSubmit`→`busyStart`(프롬프트 처리 시작=달리기), `Stop`→`busyEnd`(응답 종료=idle 복귀). id는 `session_id` + event 종류 + 카운터/랜덤으로 유일하게. **이벤트에 HMAC `sig` 포함**(치팅 방지: 앱은 유효 서명 이벤트만 반영). `sig`는 `{id,kind,ts}`에 대한 서명. busyStart/busyEnd는 XP를 주지 않는 활동 신호일 뿐(애니메이션용).
 
 - [ ] **Step 1: 실패하는 테스트 작성** (`test/hook.test.js`)
 
@@ -655,6 +655,10 @@ describe('buildEvent', () => {
   it('maps PostToolUse to toolUse event', () => {
     const e = buildEvent({ hook_event_name: 'PostToolUse', session_id: 's1' }, 2000, () => 0.5);
     expect(e.kind).toBe('toolUse');
+  });
+  it('maps activity events (UserPromptSubmit→busyStart, Stop→busyEnd)', () => {
+    expect(buildEvent({ hook_event_name: 'UserPromptSubmit', session_id: 's1' }, 3000, () => 0.5).kind).toBe('busyStart');
+    expect(buildEvent({ hook_event_name: 'Stop', session_id: 's1' }, 4000, () => 0.5).kind).toBe('busyEnd');
   });
   it('signs the event so the app can verify it (anti-cheat)', () => {
     const e = buildEvent({ hook_event_name: 'PostToolUse', session_id: 's1' }, 2000, () => 0.5);
@@ -680,7 +684,12 @@ import { join } from 'node:path';
 import { dataDir, EVENTS_FILE } from '../src/core/paths.js';
 import { sign } from '../src/core/integrity.js';
 
-const KIND = { SessionStart: 'sessionStart', PostToolUse: 'toolUse' };
+const KIND = {
+  SessionStart: 'sessionStart',
+  PostToolUse: 'toolUse',
+  UserPromptSubmit: 'busyStart', // 프롬프트 처리 시작 → 달리기
+  Stop: 'busyEnd',               // 응답 종료 → idle/walk 복귀
+};
 
 export function buildEvent(input, now, rand = Math.random) {
   const kind = KIND[input?.hook_event_name];
@@ -717,20 +726,22 @@ if (process.argv[1] && process.argv[1].endsWith('pocketmon-hook.js')) main();
 
 `~/.claude/settings.json`의 hooks에 아래를 추가한다(경로는 이 레포 절대경로로):
 
+동일한 command를 4개 이벤트에 등록한다(SessionStart=등장, PostToolUse=기술,
+UserPromptSubmit=달리기 시작, Stop=idle 복귀):
+
 ```json
 {
   "hooks": {
-    "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/pocketmon-desktop/hook/pocketmon-hook.js" }] }
-    ],
-    "PostToolUse": [
-      { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/pocketmon-desktop/hook/pocketmon-hook.js" }] }
-    ]
+    "SessionStart":     [ { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/pocketmon-desktop/hook/pocketmon-hook.js" }] } ],
+    "PostToolUse":      [ { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/pocketmon-desktop/hook/pocketmon-hook.js" }] } ],
+    "UserPromptSubmit": [ { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/pocketmon-desktop/hook/pocketmon-hook.js" }] } ],
+    "Stop":             [ { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/pocketmon-desktop/hook/pocketmon-hook.js" }] } ]
   }
 }
 ```
 
-훅은 이벤트를 `~/.pocketmon/events.jsonl`에 append하며, 앱이 이를 감시해 반응한다.
+훅은 서명된 이벤트를 `~/.pocketmon/events.jsonl`에 append하며, 앱이 이를 감시해
+XP·활동 애니메이션(달리기/기술)에 반영한다.
 ````
 
 - [ ] **Step 5: 테스트 통과 확인**
@@ -757,7 +768,10 @@ git add -A && git commit -m "feat: Claude Code hook 스크립트 + 설치 안내
 **Interfaces:**
 - Produces:
   - `palette.js`: `PALETTE` — 색상 hex 배열(인덱스 0 = 투명 `null`). 게임보이/8비트 톤 제한 세트.
-  - `sprites/index.js`: `SPRITES` — `{ [speciesKey]: [stage0Frames, stage1Frames, stage2Frames] }`. 각 stage는 프레임 배열, 각 프레임은 2D 숫자 매트릭스(팔레트 인덱스). 매트릭스는 정사각(예 16×16). 최소 idle 1프레임 + jump 1프레임. `getSprite(species, stage) -> frames[]`.
+  - `sprites/index.js`:
+    - `ANIMS` — 애니메이션 이름 상수 배열 `['idle','walk','run','skill']`.
+    - `SPRITES` — `{ [speciesKey]: [stage0, stage1, stage2] }`. 각 stage는 **명명 애니 세트** 객체 `{ idle:[frame..], walk:[frame..], run:[frame..], skill:[frame..] }`. 각 frame은 정사각 2D 숫자 매트릭스(팔레트 인덱스, 예 16×16). 최소 프레임: idle 2, walk 2, run 2, skill 1.
+    - `getFrames(species, stage, anim) -> frame[]` — 해당 애니 프레임 배열. 없는 anim은 `idle`로 폴백.
   - `canvas-render.js`: `drawFrame(ctx, frame, palette, scale)` — 매트릭스를 canvas에 픽셀 사각형으로 그림(0/투명은 스킵).
 
 - [ ] **Step 1: 실패하는 테스트 작성** (`test/sprites.test.js`)
@@ -765,35 +779,57 @@ git add -A && git commit -m "feat: Claude Code hook 스크립트 + 설치 안내
 ```js
 import { describe, it, expect } from 'vitest';
 import { PALETTE } from '../src/core/sprites/palette.js';
-import { SPRITES, getSprite } from '../src/core/sprites/index.js';
+import { SPRITES, ANIMS, getFrames } from '../src/core/sprites/index.js';
 import { ROSTER } from '../src/core/roster.js';
 
+const eachFrame = (cb) => {
+  for (const key of Object.keys(SPRITES))
+    for (const stage of SPRITES[key])
+      for (const anim of ANIMS)
+        for (const frame of stage[anim]) cb(frame, key, anim);
+};
+
 describe('sprites', () => {
-  it('every species has 3 stages of frames', () => {
+  it('every species has 3 stages, each with all named anims', () => {
     for (const s of ROSTER) {
       const stages = SPRITES[s.key];
       expect(stages).toHaveLength(3);
-      for (const frames of stages) expect(frames.length).toBeGreaterThanOrEqual(1);
-    }
-  });
-  it('all pixel indices are within palette range and frames are square', () => {
-    for (const key of Object.keys(SPRITES)) {
-      for (const frames of SPRITES[key]) {
-        for (const frame of frames) {
-          const n = frame.length;
-          for (const row of frame) {
-            expect(row).toHaveLength(n);
-            for (const idx of row) {
-              expect(idx).toBeGreaterThanOrEqual(0);
-              expect(idx).toBeLessThan(PALETTE.length);
-            }
-          }
-        }
+      for (const stage of stages) {
+        for (const anim of ANIMS) expect(Array.isArray(stage[anim])).toBe(true);
+        expect(stage.idle.length).toBeGreaterThanOrEqual(2);
+        expect(stage.walk.length).toBeGreaterThanOrEqual(2);
+        expect(stage.run.length).toBeGreaterThanOrEqual(2);
+        expect(stage.skill.length).toBeGreaterThanOrEqual(1);
       }
     }
   });
-  it('getSprite returns frames for a species+stage', () => {
-    expect(getSprite('electric', 0).length).toBeGreaterThanOrEqual(1);
+  it('all frames are square and use valid palette indices', () => {
+    eachFrame((frame) => {
+      const n = frame.length;
+      for (const row of frame) {
+        expect(row).toHaveLength(n);
+        for (const idx of row) {
+          expect(idx).toBeGreaterThanOrEqual(0);
+          expect(idx).toBeLessThan(PALETTE.length);
+        }
+      }
+    });
+  });
+  // 실제로 서로 다른 도트인지 강제 (placeholder 동일 스프라이트 금지)
+  it('idle base frame differs across all 12 species+stage sprites', () => {
+    const seen = new Set();
+    for (const key of Object.keys(SPRITES)) {
+      for (const stage of SPRITES[key]) {
+        const sig = JSON.stringify(stage.idle[0]);
+        expect(seen.has(sig)).toBe(false); // 중복 금지
+        seen.add(sig);
+      }
+    }
+    expect(seen.size).toBe(12);
+  });
+  it('getFrames returns frames and falls back to idle for unknown anim', () => {
+    expect(getFrames('electric', 0, 'run').length).toBeGreaterThanOrEqual(2);
+    expect(getFrames('electric', 0, 'nope')).toEqual(getFrames('electric', 0, 'idle'));
   });
 });
 ```
@@ -825,53 +861,84 @@ export const PALETTE = [
 
 - [ ] **Step 4: sprites/index.js 구현**
 
-여기서는 4종 × 3단계 매트릭스를 정의한다. 각 프레임은 16×16 숫자 2D 배열이며,
-idle 프레임과 jump 프레임(살짝 위로 이동/눌린 형태) 최소 2개를 둔다. 색인은
-`palette.js` 범위 내여야 한다. 아래는 **구조 예시**이며, 각 종·단계마다 실제로
-알아볼 수 있는 8비트 도트를 채워 넣는다(전기=노랑3/피부10, 불=주황4/빨강5,
-물=파랑7/8, 풀=초록6). 진화 단계가 오를수록 매트릭스에 디테일(꼬리·크기)을 추가.
+이 태스크의 **실제 산출물은 12개(4종×3단계)의 서로 구분되는 8비트 도트**와 각
+스프라이트의 명명 애니(idle/walk/run/skill)다. 구조·헬퍼·애니 파생 규칙은 아래
+코드로 고정하고, **각 종·단계의 idle 베이스 프레임(16×16)은 알아볼 수 있게 손수
+그린다**(distinguishability 테스트가 12개 전부 다름을 강제). 애니 변형(walk/run/skill)은
+베이스에서 transform으로 파생한다.
+
+작업 순서: (1) 아래 헬퍼/transform/`getFrames`/`ANIMS`/`buildStage`를 그대로 두고,
+(2) 12개 `IDLE_BASE[key][stage]` 16×16 매트릭스를 종별로 구분되게 채운다. 색 가이드:
+풀=초록6/흰2, 불=주황4/빨강5, 물=파랑7/하늘8, 전기=노랑3/피부10, 윤곽=1, 눈=1/흰2.
+단계가 오를수록 실루엣을 키우고 디테일(꼬리·귀·뿔) 추가로 형태를 확실히 구분한다.
 
 ```js
 import { ROSTER } from '../roster.js';
 
-// 16x16 빈 프레임 헬퍼
-const O = () => Array.from({ length: 16 }, () => Array(16).fill(0));
+const N = 16;
+export const ANIMS = ['idle', 'walk', 'run', 'skill'];
+const blank = () => Array.from({ length: N }, () => Array(N).fill(0));
+const clone = (f) => f.map((r) => r.slice());
 
-// 예: 전기 1단계(피츄) idle — 실제 구현에서 도트를 채운다.
-// (아래 electricPichuIdle 등은 알아볼 수 있는 형태로 손수 채운 매트릭스)
-// 각 종/단계 함수는 [idleFrame, jumpFrame] 반환.
+// --- 애니 파생 transform (베이스 idle 프레임 1장에서 프레임들을 만든다) ---
+const bob = (f) => { const g = clone(f); g.pop(); g.unshift(Array(N).fill(0)); return g; }; // 1px 위
+const shiftLegs = (f) => {                       // 아랫줄만 좌우로 살짝 → 걷는 느낌
+  const g = clone(f);
+  const row = g[N - 1];
+  g[N - 1] = [0, ...row.slice(0, N - 1)];
+  return g;
+};
+const lean = (f) => {                             // 한 칸 앞으로 기울여 달리는 느낌
+  const g = clone(f);
+  for (let y = 0; y < N; y++) g[y] = [...g[y].slice(1), 0];
+  return g;
+};
+const flash = (f, spark) => {                      // 기술: 몸 반짝 + 스파크 픽셀
+  const g = clone(f);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (g[y][x] === 1 ? false : g[y][x]) { /* keep */ }
+  // 오른쪽 위에 스파크(spark 색) 몇 점
+  g[3][13] = spark; g[4][14] = spark; g[2][14] = spark;
+  return g;
+};
 
-function placeholderPair(mainColor) {
-  // 임시 아님: 최소한의 알아볼 수 있는 둥근 몸통을 mainColor로 그린 idle/jump.
-  const idle = O();
-  for (let y = 5; y < 13; y++)
-    for (let x = 4; x < 12; x++) idle[y][x] = mainColor;
-  for (let y = 5; y < 13; y++) { idle[y][3] = 1; idle[y][12] = 1; }
-  for (let x = 4; x < 12; x++) { idle[4][x] = 1; idle[13][x] = 1; }
-  const jump = idle.map((row) => row.slice());
-  // jump: 한 픽셀 위로
-  jump.shift(); jump.push(Array(16).fill(0));
-  return [idle, jump];
+const SPARK = { grass: 6, fire: 5, water: 8, electric: 3 };
+
+// idle 베이스 → 명명 애니 세트
+function buildStage(base, sparkColor) {
+  return {
+    idle: [base, bob(base)],
+    walk: [base, shiftLegs(base)],
+    run: [lean(base), lean(bob(base))],
+    skill: [flash(base, sparkColor)],
+  };
 }
 
-const MAIN = { grass: 6, fire: 4, water: 7, electric: 3 };
+// ▼▼▼ 구현자가 채울 부분: 12개 구분되는 16×16 idle 베이스 ▼▼▼
+// 각 값은 16행×16열 팔레트 인덱스 매트릭스. 종·단계마다 실루엣/색을 다르게.
+const IDLE_BASE = {
+  grass:    [ /* 치코리타 */ , /* 베이리프 */ , /* 메가니움 */ ],
+  fire:     [ /* 브케인 */ , /* 마그케인 */ , /* 블레이범 */ ],
+  water:    [ /* 리아코 */ , /* 엘리게이 */ , /* 장크로다일 */ ],
+  electric: [ /* 피츄 */ , /* 피카츄 */ , /* 라이츄 */ ],
+};
+// ▲▲▲ 위 12칸을 실제 매트릭스로 채운다(빈 칸 금지) ▲▲▲
 
 export const SPRITES = Object.fromEntries(
-  ROSTER.map((s) => [s.key, [
-    placeholderPair(MAIN[s.key]),          // stage 0
-    placeholderPair(MAIN[s.key]),          // stage 1 (구현 시 디테일 차별화)
-    placeholderPair(MAIN[s.key]),          // stage 2
-  ]]),
+  ROSTER.map((s) => [s.key,
+    IDLE_BASE[s.key].map((base) => buildStage(base, SPARK[s.key])),
+  ]),
 );
 
-export function getSprite(species, stage) {
-  return SPRITES[species][stage];
+export function getFrames(species, stage, anim) {
+  const set = SPRITES[species][stage];
+  return set[anim] || set.idle;
 }
 ```
 
-> 구현 노트: 위 `placeholderPair`는 테스트를 통과시키는 유효 매트릭스이지만,
-> 실제 작업에서는 각 포켓몬을 알아볼 수 있도록 종별 도트를 손수 그려 교체한다
-> (귀·꼬리·눈 등). 스프라이트 품질 향상은 이 태스크의 실제 산출물이다.
+> 구현 노트: `IDLE_BASE`의 12칸을 반드시 **서로 다른 실제 도트**로 채운다
+> (distinguishability 테스트가 12개 전부 다름을 검증). 헬퍼/transform은 그대로 사용.
+> 하나의 좋은 idle 베이스만 그리면 walk/run/skill은 자동 파생된다. 도트는 게임
+> 원본 스프라이트 파일을 복사하지 말고 8비트 스타일로 새로 그린 오리지널이어야 한다.
 
 - [ ] **Step 5: canvas-render.js 구현**
 
