@@ -389,27 +389,37 @@
         [[0.10, -0.5], [-0.48, 0.52]],   // 丿
         [[-0.06, -0.22], [0.48, 0.52]],  // 乀
       ];
-      // 각 획을 곧은 직선 위에 얹은 "이글이글 타오르는 불꽃 덩어리"로 그린다.
-      // 중심은 직선(휘지 않음), 덩어리 크기만 시간+위치로 flicker → 불이 살아있게.
-      // additive 겹침으로 글로우를 내고 shadowBlur는 쓰지 않음(성능). 원 개수도 줄임.
-      ctx.globalCompositeOperation = 'lighter';
-      for (let si = 0; si < strokes.length; si++) {
-        const p = Math.min(1, Math.max(0, (nowT - si * 0.22) / 0.35)); // 획 순차 등장
-        if (p <= 0) continue;
-        const [a, b] = strokes[si];
+      // 획 등장 진행도 + 끝점 계산
+      const ends = strokes.map(([a, b], si) => {
+        const p = Math.min(1, Math.max(0, (nowT - si * 0.22) / 0.35));
         const ax = cx + a[0] * S, ay = cy + a[1] * S;
-        const ex = ax + (b[0] * S - a[0] * S) * p;
-        const ey = ay + (b[1] * S - a[1] * S) * p;
-        const len = Math.hypot(ex - ax, ey - ay);
-        const n = Math.max(2, Math.floor(len / 16));
+        return { ax, ay, ex: ax + (b[0] * S - a[0] * S) * p, ey: ay + (b[1] * S - a[1] * S) * p, p };
+      });
+      ctx.globalCompositeOperation = 'lighter'; // additive 글로우(shadowBlur 미사용 — 성능)
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      // 1) 매끈한 굵은 획: 어두운빨강→빨강→주황→노랑 코어 레이어(살짝 flicker)
+      const flickW = 0.92 + 0.08 * Math.sin(nowT * 18);
+      for (const [w, c] of [[46, '#5a1108'], [34, '#d13b27'], [20, '#e08a1e'], [9, '#f8c838']]) {
+        ctx.strokeStyle = c; ctx.lineWidth = w * flickW;
+        for (const e of ends) {
+          if (e.p <= 0) continue;
+          ctx.globalAlpha = alpha * 0.55;
+          ctx.beginPath(); ctx.moveTo(e.ax, e.ay); ctx.lineTo(e.ex, e.ey); ctx.stroke();
+        }
+      }
+      // 2) 획 위로 솟는 작은 불꽃 텅(이글이글)
+      ctx.fillStyle = '#f8c838';
+      for (let si = 0; si < ends.length; si++) {
+        const e = ends[si];
+        if (e.p <= 0) continue;
+        const len = Math.hypot(e.ex - e.ax, e.ey - e.ay);
+        const n = Math.floor(len / 14);
         for (let k = 0; k <= n; k++) {
-          const t = k / n;
-          const x = ax + (ex - ax) * t, y = ay + (ey - ay) * t;
-          const fl = 0.6 + 0.3 * Math.sin(nowT * 15 + k * 0.7 + si * 2) + 0.2 * Math.sin(nowT * 29 + k);
-          const base = 26 * Math.max(0.4, fl);
-          ctx.globalAlpha = alpha * 0.5;
-          ctx.fillStyle = '#d13b27'; ctx.beginPath(); ctx.arc(x, y, base, 0, TAU); ctx.fill();
-          ctx.fillStyle = '#f8c838'; ctx.beginPath(); ctx.arc(x, y, base * 0.42, 0, TAU); ctx.fill();
+          const t = k / n, x = e.ax + (e.ex - e.ax) * t, y = e.ay + (e.ey - e.ay) * t;
+          const fl = 0.5 + 0.5 * Math.sin(nowT * 12 + k * 0.9 + si * 3);
+          const h = 9 + 13 * Math.max(0, fl);
+          ctx.globalAlpha = alpha * 0.45;
+          ctx.beginPath(); ctx.ellipse(x, y - h * 0.5, 4, h, 0, 0, TAU); ctx.fill();
         }
       }
       // 획을 타고 오르는 불티
