@@ -18,6 +18,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const TICK_MS = 4000;
 const WINDOW_SIZE = 96;
+// 더블클릭 상세 패널을 담기 위해 창을 잠깐 확장할 크기(닫으면 WINDOW_SIZE로 원복).
+const DETAIL_WIDTH = 200;
+const DETAIL_HEIGHT = 232;
 const DRIFT_STEP_BUSY = 6; // 프롬프트 처리중(달리기) — 크게 움직임
 const DRIFT_STEP_IDLE = 1; // 평상시 — 가끔 조금만 움직임
 const IDLE_MOVE_CHANCE = 0.15;
@@ -288,6 +291,16 @@ app.whenReady().then(() => {
     const [x, y] = mainWindow.getPosition();
     mainWindow.setPosition(Math.round(x + dx), Math.round(y + dy));
     lastManualMoveAt = Date.now();
+  });
+
+  // 더블클릭 상세 패널: 열리면 창을 확장해 패널을 담고, 닫히면 원래 크기로 원복.
+  // 좌상단(펫 위치)은 유지하고 아래/오른쪽으로만 커지도록 x,y는 그대로 둔다.
+  ipcMain.on('pkmn:set-detail', (_e, open) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const [x, y] = mainWindow.getPosition();
+    const w = open ? DETAIL_WIDTH : WINDOW_SIZE;
+    const h = open ? DETAIL_HEIGHT : WINDOW_SIZE;
+    mainWindow.setBounds({ x, y, width: w, height: h });
   });
 
   createWindow();
