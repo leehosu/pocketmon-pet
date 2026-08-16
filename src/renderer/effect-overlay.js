@@ -1,5 +1,5 @@
 // 화면 전체 기술 이펙트 — 전부 오리지널 canvas 파티클 애니메이션.
-// effect 종류(leaf/fire/water/electric)를 쿼리로 받아 재생 후 페이드아웃.
+// effect 종류를 쿼리로 받아 재생 후 페이드아웃. 종류별로 서로 다른 움직임.
 (function () {
   const effect = new URLSearchParams(location.search).get('effect') || 'leaf';
   const canvas = document.getElementById('fx');
@@ -9,91 +9,136 @@
   resize();
   window.addEventListener('resize', resize);
 
-  const DURATION = 2600;
-  const FADE_IN = 180;
-  const FADE_OUT = 550;
+  const DURATION = 2600, FADE_IN = 180, FADE_OUT = 550;
   const rand = (a, b) => a + Math.random() * (b - a);
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  const TAU = Math.PI * 2;
 
-  const COLORS = {
+  const COL = {
     leaf: ['#3a9e3a', '#57b84f', '#2e7d32', '#7cc576'],
     fire: ['#f8c838', '#e08a1e', '#d13b27', '#ff6a3d'],
     water: ['#1e6bd1', '#7ac6ff', '#4aa8ff', '#bfe6ff'],
     electric: ['#f8c838', '#ffffff', '#fff27a'],
   };
+  const family = effect.split('_')[0];
+  const colors = COL[family] || COL.leaf;
 
-  // --- 파티클 초기화 (효과별) ---
   let parts = [];
-  function init() {
-    if (effect === 'leaf') {
-      for (let i = 0; i < 80; i++) {
-        parts.push({
-          baseX: rand(0, W), y: rand(-H * 0.5, H * 0.4), vy: rand(40, 105),
-          sway: rand(20, 55), freq: rand(0.5, 1.6), phase: rand(0, 6.28),
-          rot: rand(0, 6.28), vrot: rand(-2.5, 2.5), size: rand(9, 20), c: pick(COLORS.leaf),
-        });
-      }
-    } else if (effect === 'fire') {
-      for (let i = 0; i < 150; i++) {
-        parts.push({
-          x: rand(0, W), delay: rand(0, 1.7), life: rand(0.8, 1.6),
-          vy: rand(70, 190), drift: rand(-40, 40), size: rand(4, 11), c: pick(COLORS.fire),
-        });
-      }
-    } else if (effect === 'water') {
-      for (let i = 0; i < 130; i++) {
-        parts.push({
-          x: rand(0, W), delay: rand(0, 1.4), life: rand(0.5, 1.0),
-          vy: rand(280, 620), len: rand(10, 26), c: pick(COLORS.water),
-        });
-      }
-    }
-    // electric은 프레임에서 동적으로 볼트를 생성(아래).
-  }
-  init();
-
-  // electric 볼트 상태
   let bolts = [];
   let lastBolt = -1;
+  let flashUntil = -1;
 
-  function makeBolt() {
-    const x = rand(W * 0.1, W * 0.9);
+  function setup() {
+    if (effect === 'leaf') {
+      for (let i = 0; i < 80; i++) parts.push({
+        baseX: rand(0, W), y: rand(-H * 0.5, H * 0.4), vy: rand(40, 105),
+        sway: rand(20, 55), freq: rand(0.5, 1.6), phase: rand(0, TAU),
+        rot: rand(0, TAU), vrot: rand(-2.5, 2.5), size: rand(9, 20), c: pick(colors),
+      });
+    } else if (effect === 'leaf_swirl') {
+      // 화면 중앙을 도는 소용돌이(회오리)
+      for (let i = 0; i < 90; i++) parts.push({
+        angle: rand(0, TAU), radius: rand(20, Math.min(W, H) * 0.45),
+        av: rand(1.6, 3.2), rot: rand(0, TAU), vrot: rand(-4, 4),
+        size: rand(8, 18), c: pick(colors), yoff: rand(-40, 40),
+      });
+    } else if (effect === 'fire') {
+      for (let i = 0; i < 150; i++) parts.push({
+        x: rand(0, W), delay: rand(0, 1.7), life: rand(0.8, 1.6),
+        vy: rand(70, 190), drift: rand(-40, 40), size: rand(4, 11), c: pick(colors),
+      });
+    } else if (effect === 'fire_breath') {
+      // 하단 중앙에서 위로 부채꼴로 뿜는 큰 불꽃
+      for (let i = 0; i < 110; i++) parts.push({
+        ang: rand(Math.PI * 0.15, Math.PI * 0.85), speed: rand(240, 620),
+        delay: rand(0, 1.0), life: rand(0.7, 1.4), size: rand(12, 30), c: pick(colors),
+      });
+    } else if (effect === 'water') {
+      for (let i = 0; i < 130; i++) parts.push({
+        x: rand(0, W), delay: rand(0, 1.4), life: rand(0.5, 1.0),
+        vy: rand(280, 620), len: rand(10, 26), c: pick(colors),
+      });
+    } else if (effect === 'water_bubbles') {
+      // 아래에서 떠오르는 거품(테두리 원) + 좌우 흔들림
+      for (let i = 0; i < 90; i++) parts.push({
+        x: rand(0, W), delay: rand(0, 1.6), life: rand(1.0, 2.0),
+        vy: rand(80, 220), size: rand(5, 18), amp: rand(6, 22), freq: rand(1, 3),
+        phase: rand(0, TAU), c: pick(colors),
+      });
+    } else if (effect === 'electric') {
+      // 무작위 위치에서 깜빡이는 스파크 점
+      for (let i = 0; i < 70; i++) parts.push({
+        x: rand(0, W), y: rand(0, H), size: rand(2, 6),
+        on: rand(0, 1), blink: rand(6, 16), phase: rand(0, TAU), c: pick(colors),
+      });
+    }
+    // electric_bolts는 프레임 루프에서 동적으로 큰 볼트 + 화면 번쩍 생성
+  }
+  setup();
+
+  function makeBolt(big) {
+    const x = rand(W * 0.08, W * 0.92);
     const segs = [];
     let cx = x, cy = 0;
-    const steps = Math.floor(rand(6, 11));
+    const steps = Math.floor(rand(7, 12));
     const stepY = H / steps;
     for (let s = 0; s <= steps; s++) {
       segs.push({ x: cx, y: cy });
-      cx += rand(-60, 60);
+      cx += rand(-70, 70);
       cy += stepY;
     }
-    return { segs, born: nowT, life: rand(0.12, 0.22), c: pick(COLORS.electric), w: rand(2, 4) };
+    return { segs, born: nowT, life: rand(0.14, 0.26), c: pick(COL.electric), w: big ? rand(3, 6) : rand(2, 3.5) };
   }
 
-  // --- 그리기 ---
-  function drawLeaf(p, t) {
-    const x = p.baseX + Math.sin(t * p.freq + p.phase) * p.sway;
+  function drawLeaf(x, y, rot, size, c) {
     ctx.save();
-    ctx.translate(x, p.y);
-    ctx.rotate(p.rot);
-    ctx.fillStyle = p.c;
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.fillStyle = c;
     ctx.beginPath();
-    ctx.ellipse(0, 0, p.size * 0.5, p.size, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, size * 0.5, size, 0, 0, TAU);
     ctx.fill();
     ctx.strokeStyle = 'rgba(0,0,0,.22)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, -p.size); ctx.lineTo(0, p.size);
+    ctx.moveTo(0, -size); ctx.lineTo(0, size);
     ctx.stroke();
     ctx.restore();
   }
 
-  let nowT = 0; // 초 단위 경과
-  let startTs = null;
+  function drawBolts(alpha) {
+    if (nowT - lastBolt > 0.11 && elapsed < DURATION - FADE_OUT) {
+      const big = effect === 'electric_bolts';
+      bolts.push(makeBolt(big));
+      if (big) { bolts.push(makeBolt(true)); flashUntil = nowT + 0.06; }
+      else if (Math.random() < 0.4) bolts.push(makeBolt(false));
+      lastBolt = nowT;
+    }
+    if (effect === 'electric_bolts' && nowT < flashUntil) {
+      ctx.globalAlpha = alpha * 0.28;
+      ctx.fillStyle = '#fff27a';
+      ctx.fillRect(0, 0, W, H);
+    }
+    bolts = bolts.filter((b) => nowT - b.born < b.life);
+    for (const b of bolts) {
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = b.c;
+      ctx.lineWidth = b.w;
+      ctx.shadowColor = '#f8c838';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.moveTo(b.segs[0].x, b.segs[0].y);
+      for (let i = 1; i < b.segs.length; i++) ctx.lineTo(b.segs[i].x, b.segs[i].y);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  let nowT = 0, elapsed = 0, startTs = null;
 
   function frame(ts) {
     if (startTs === null) startTs = ts;
-    const elapsed = ts - startTs; // ms
+    elapsed = ts - startTs;
     nowT = elapsed / 1000;
     const dt = 1 / 60;
 
@@ -105,23 +150,45 @@
 
     if (effect === 'leaf') {
       for (const p of parts) {
-        p.y += p.vy * dt;
-        p.rot += p.vrot * dt;
+        p.y += p.vy * dt; p.rot += p.vrot * dt;
         if (p.y > H + 30) p.y = -30;
-        drawLeaf(p, nowT);
+        const x = p.baseX + Math.sin(nowT * p.freq + p.phase) * p.sway;
+        drawLeaf(x, p.y, p.rot, p.size, p.c);
+      }
+    } else if (effect === 'leaf_swirl') {
+      const cx = W / 2, cy = H / 2;
+      for (const p of parts) {
+        p.angle += p.av * dt; p.rot += p.vrot * dt;
+        const x = cx + Math.cos(p.angle) * p.radius;
+        const y = cy + Math.sin(p.angle) * p.radius * 0.62 + p.yoff;
+        drawLeaf(x, y, p.rot, p.size, p.c);
       }
     } else if (effect === 'fire') {
       for (const p of parts) {
         const age = nowT - p.delay;
         if (age < 0 || age > p.life) continue;
-        const f = age / p.life; // 0..1
+        const f = age / p.life;
         const y = H - f * p.vy * p.life * 3.2;
         const x = p.x + Math.sin(age * 6 + p.x) * p.drift * f;
         ctx.globalAlpha = alpha * (1 - f);
         ctx.fillStyle = p.c;
-        const s = p.size * (1 - f * 0.6);
         ctx.beginPath();
-        ctx.arc(x, y, s, 0, Math.PI * 2);
+        ctx.arc(x, y, p.size * (1 - f * 0.6), 0, TAU);
+        ctx.fill();
+      }
+    } else if (effect === 'fire_breath') {
+      const ox = W / 2, oy = H + 10;
+      for (const p of parts) {
+        const age = nowT - p.delay;
+        if (age < 0 || age > p.life) continue;
+        const f = age / p.life;
+        const d = p.speed * age;
+        const x = ox + Math.cos(p.ang) * d;
+        const y = oy - Math.sin(p.ang) * d;
+        ctx.globalAlpha = alpha * (1 - f) * 0.95;
+        ctx.fillStyle = p.c;
+        ctx.beginPath();
+        ctx.arc(x, y, p.size * (1 - f * 0.5), 0, TAU);
         ctx.fill();
       }
     } else if (effect === 'water') {
@@ -134,37 +201,44 @@
         ctx.strokeStyle = p.c;
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(p.x, y);
-        ctx.lineTo(p.x, y + p.len);
+        ctx.moveTo(p.x, y); ctx.lineTo(p.x, y + p.len);
         ctx.stroke();
+      }
+    } else if (effect === 'water_bubbles') {
+      for (const p of parts) {
+        const age = nowT - p.delay;
+        if (age < 0 || age > p.life) continue;
+        const f = age / p.life;
+        const y = H + 20 - age * p.vy;
+        const x = p.x + Math.sin(age * p.freq + p.phase) * p.amp;
+        ctx.globalAlpha = alpha * (1 - f * 0.7);
+        ctx.strokeStyle = p.c;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, p.size, 0, TAU);
+        ctx.stroke();
+        ctx.globalAlpha = alpha * (1 - f) * 0.5; // 하이라이트
+        ctx.beginPath();
+        ctx.arc(x - p.size * 0.3, y - p.size * 0.3, p.size * 0.25, 0, TAU);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
       }
     } else if (effect === 'electric') {
-      // 주기적으로 볼트 생성
-      if (nowT - lastBolt > 0.11 && elapsed < DURATION - FADE_OUT) {
-        bolts.push(makeBolt());
-        if (Math.random() < 0.5) bolts.push(makeBolt());
-        lastBolt = nowT;
-      }
-      bolts = bolts.filter((b) => nowT - b.born < b.life);
-      for (const b of bolts) {
-        ctx.globalAlpha = alpha;
-        ctx.strokeStyle = b.c;
-        ctx.lineWidth = b.w;
-        ctx.shadowColor = '#f8c838';
-        ctx.shadowBlur = 8;
+      for (const p of parts) {
+        const on = (Math.sin(nowT * p.blink + p.phase) + 1) / 2; // 0..1 깜빡임
+        ctx.globalAlpha = alpha * on;
+        ctx.fillStyle = p.c;
         ctx.beginPath();
-        ctx.moveTo(b.segs[0].x, b.segs[0].y);
-        for (let i = 1; i < b.segs.length; i++) ctx.lineTo(b.segs[i].x, b.segs[i].y);
-        ctx.stroke();
+        ctx.arc(p.x, p.y, p.size, 0, TAU);
+        ctx.fill();
       }
-      ctx.shadowBlur = 0;
+      drawBolts(alpha); // 작은 볼트도 간간이
+    } else if (effect === 'electric_bolts') {
+      drawBolts(alpha);
     }
 
-    if (elapsed < DURATION) {
-      requestAnimationFrame(frame);
-    } else {
-      ctx.clearRect(0, 0, W, H); // 메인이 곧 창을 닫지만 마지막 프레임은 깨끗하게
-    }
+    if (elapsed < DURATION) requestAnimationFrame(frame);
+    else ctx.clearRect(0, 0, W, H);
   }
   requestAnimationFrame(frame);
 })();
