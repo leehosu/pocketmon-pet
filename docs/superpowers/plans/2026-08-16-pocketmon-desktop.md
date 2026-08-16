@@ -979,7 +979,7 @@ git add -A && git commit -m "feat: 8비트 팔레트/스프라이트 데이터 +
 **Interfaces:**
 - Consumes: `store.js`, `xp-engine.js`, `session-parser.js`, `paths.js`, `roster.js`.
 - Produces:
-  - `orchestrator.js`: `tick(deps) -> { state, changes }` — 순수하게 테스트 가능한 조율 함수. `deps = { state, readEvents(): event[], readSessionEvents(sinceTs): event[], today }`. events.jsonl 이벤트 + 세션 이벤트를 합쳐 `applyEvents`에 넘기고, 갱신 state와 changes 반환. 처음 실행(species=null·locked=false)이면 먼저 `rollStarter` 수행하도록 `ensureStarter(state, rng) -> state`도 export.
+  - `orchestrator.js`: `tick(deps) -> { state, changes, activity }` — 순수하게 테스트 가능한 조율 함수. `deps = { state, readEvents(): event[], readSessionEvents(sinceTs): event[], today }`. hook 이벤트 + 세션 이벤트를 합쳐 `applyEvents`에 넘기고, 갱신 state·changes와 함께 **활동 상태** `activity = { busy: bool, skillPulse: bool }`를 반환한다. busy는 이벤트의 `busyStart`(→true)/`busyEnd`(→false)로 전이(직전 `state.busy` 이어받음), skillPulse는 이번 tick에 `toolUse`가 있었는지. 반환 state에 `busy`, `lastSessionTs`, `lastActiveAt` 갱신. 처음 실행이면 먼저 `rollStarter` 수행하도록 `ensureStarter(state, rng) -> state`도 export.
   - `index.js`: Electron 앱 부트 — 투명·frameless·always-on-top BrowserWindow 생성, Tray 우클릭 메뉴(상태/뽑기연출/종료), 주기 tick으로 IPC push. (테스트 제외 — 수동 확인.)
 
 - [ ] **Step 1: 실패하는 테스트 작성** (`test/orchestrator.test.js`)
@@ -1013,6 +1013,29 @@ describe('tick', () => {
     expect(next.xp).toBe(2 + 2); // toolUse 2 + 2000/1000
     expect(changes.reactions).toBe(1);
   });
+
+  it('derives busy activity from busyStart/busyEnd and skillPulse from toolUse', () => {
+    const base = { ...defaultState(), species: 'electric', locked: true, dailyDate: '2026-08-16' };
+    // busyStart → busy true, toolUse → skillPulse true
+    const r1 = tick({
+      state: base,
+      readEvents: () => [{ id: 'b1', kind: 'busyStart', ts: 1 }, { id: 't1', kind: 'toolUse', ts: 2 }],
+      readSessionEvents: () => [],
+      today: '2026-08-16',
+    });
+    expect(r1.activity.busy).toBe(true);
+    expect(r1.activity.skillPulse).toBe(true);
+    expect(r1.state.busy).toBe(true);
+    // next tick: busyEnd → busy false, no toolUse → skillPulse false
+    const r2 = tick({
+      state: r1.state,
+      readEvents: () => [{ id: 'b2', kind: 'busyEnd', ts: 3 }],
+      readSessionEvents: () => [],
+      today: '2026-08-16',
+    });
+    expect(r2.activity.busy).toBe(false);
+    expect(r2.activity.skillPulse).toBe(false);
+  });
 });
 ```
 
@@ -1038,7 +1061,21 @@ export function tick(deps) {
   ];
   const maxTs = events.reduce((m, e) => Math.max(m, e.ts || 0), deps.state.lastSessionTs || 0);
   const { state, changes } = applyEvents(deps.state, events, { today: deps.today });
-  return { state: { ...state, lastSessionTs: maxTs, lastActiveAt: Date.now() }, changes };
+
+  // 활동 상태: busy는 busyStart/busyEnd로 전이(직전 busy 이어받음), skill은 이번 tick의 toolUse.
+  let busy = Boolean(deps.state.busy);
+  let skillPulse = false;
+  for (const e of events) {
+    if (e.kind === 'busyStart') busy = true;
+    else if (e.kind === 'busyEnd') busy = false;
+    else if (e.kind === 'toolUse') skillPulse = true;
+  }
+
+  return {
+    state: { ...state, lastSessionTs: maxTs, lastActiveAt: Date.now(), busy },
+    changes,
+    activity: { busy, skillPulse },
+  };
 }
 ```
 
@@ -1049,7 +1086,7 @@ Expected: PASS.
 
 - [ ] **Step 5: index.js + preload.js 구현 (Electron, 수동 확인)**
 
-`index.js`: `app.whenReady()`에서 `loadState(dataDir())` → `ensureStarter` → `saveState`. 투명 BrowserWindow(`transparent:true, frame:false, alwaysOnTop:true, resizable:false, skipTaskbar:true`) 생성해 `pet-window.html` 로드. `Tray`로 우클릭 메뉴(상태 보기 / 뽑기 연출 / 종료). `setInterval`로 tick 실행: `readEvents`는 events.jsonl을 읽어 각 줄을 JSON 파싱한 뒤 **`integrity.verify({id,kind,ts}, sig)`로 서명을 검증하고 유효한 이벤트만 반환**(가짜 append 무시 — 치팅 방지), 처리한 라인은 offset 기록/잘라냄. `readSessionEvents`는 `~/.claude/projects/**/*.jsonl` 최근 파일 파싱(세션 로그는 Claude Code 자신이 쓴 권위 소스라 서명 불필요). tick 결과를 `webContents.send('state', ...)`로 renderer에 전달하고 `saveState`. preload.js는 `contextBridge`로 `onState(cb)` 노출.
+`index.js`: `app.whenReady()`에서 `loadState(dataDir())` → `ensureStarter` → `busy`를 false로 리셋(재시작 시 잔여 busy 무시) → `saveState`. 투명 BrowserWindow(`transparent:true, frame:false, alwaysOnTop:true, resizable:false, skipTaskbar:true`) 생성해 `pet-window.html` 로드. `Tray`로 우클릭 메뉴(상태 보기 / 첫 만남 다시보기 / 종료). `setInterval`로 tick 실행: `readEvents`는 events.jsonl을 읽어 각 줄을 JSON 파싱한 뒤 **`integrity.verify({id,kind,ts}, sig)`로 서명을 검증하고 유효한 이벤트만 반환**(가짜 append 무시 — 치팅 방지), 처리한 라인은 offset 기록/잘라냄. `readSessionEvents`는 `~/.claude/projects/**/*.jsonl` 최근 파일 파싱(세션 로그는 Claude Code 자신이 쓴 권위 소스라 서명 불필요). tick 결과의 `{state, changes, activity}`를 `webContents.send('state', ...)`로 renderer에 전달하고 `saveState`. **활동 연동 창 이동**: `activity.busy`(달리기)일 때 창을 화면에서 좌우로 천천히 드리프트(`setBounds`/`setPosition`), 화면 경계에서 방향 반전; idle이면 가끔만 소폭 이동(walk). preload.js는 `contextBridge`로 `onState(cb)` 노출.
 
 ```js
 // preload.js
@@ -1078,9 +1115,10 @@ git add -A && git commit -m "feat: Electron main + 조율(tick/ensureStarter)"
 - Consumes: `canvas-render.js`의 `drawFrame`, `sprites/index.js`, `palette.js`, `roster.js`.
 - Produces:
   - `pet-window.js`:
-    - `nextFrameIndex(state) -> number` — 애니메이션 프레임 선택 순수 함수(idle 깜빡, react 중이면 jump).
+    - `pickAnim(s) -> 'skill'|'run'|'walk'|'idle'` — 활동 상태로 재생할 애니 선택(순수). `s = { reacting, skillActive, busy, walking }`. 우선순위: reacting→'skill', skillActive→'skill', busy→'run', walking→'walk', else 'idle'. (레벨업/진화 react는 skill 프레임 + 팝 텍스트로 표현.)
+    - `nextFrameIndex(s) -> number` — 현재 애니 안에서 프레임 순환(순수). `s = { tickCount, frameCount }` → `tickCount % frameCount`.
     - `hudVisible(ui) -> boolean` — HUD(XP바·상태창) 노출 여부 순수 함수. `ui = { hovering, pinned }`. 평상시(둘 다 false)엔 false, hover 중이거나 클릭으로 pin되면 true.
-  - 나머지(canvas 루프, `window.pkmn.onState` 구독, 드래그 이동, 레벨업/진화 팝 연출, hover/클릭 → HUD 토글)는 브라우저 동작 — 수동 확인.
+  - 나머지(canvas 루프, `window.pkmn.onState` 구독, 애니 상태머신 구동, 레벨업/진화 팝 연출, hover/클릭 → HUD 토글)는 브라우저 동작 — 수동 확인.
 
 **UX 요건:** 평상시에는 포켓몬 스프라이트만 보인다. 마우스를 올리면(hover) XP바+간단 상태(종/레벨)가 페이드인되고, 클릭하면 상세 상태창(누적 XP·다음 레벨까지·진화단계)이 pin되어 유지된다(다시 클릭하면 해제). 레벨업/진화 순간의 팝 연출은 HUD 상태와 무관하게 잠깐 표시된다.
 
@@ -1088,16 +1126,31 @@ git add -A && git commit -m "feat: Electron main + 조율(tick/ensureStarter)"
 
 ```js
 import { describe, it, expect } from 'vitest';
-import { nextFrameIndex, hudVisible } from '../src/renderer/pet-window.js';
+import { pickAnim, nextFrameIndex, hudVisible } from '../src/renderer/pet-window.js';
+
+describe('pickAnim', () => {
+  it('idle when nothing happening', () => {
+    expect(pickAnim({ reacting: false, skillActive: false, busy: false, walking: false })).toBe('idle');
+  });
+  it('walk when wandering', () => {
+    expect(pickAnim({ reacting: false, skillActive: false, busy: false, walking: true })).toBe('walk');
+  });
+  it('run when busy (prompt in progress)', () => {
+    expect(pickAnim({ reacting: false, skillActive: false, busy: true, walking: true })).toBe('run');
+  });
+  it('skill when a tool was used', () => {
+    expect(pickAnim({ reacting: false, skillActive: true, busy: true, walking: false })).toBe('skill');
+  });
+  it('react (level up/evolve) overrides all, shown via skill frames', () => {
+    expect(pickAnim({ reacting: true, skillActive: false, busy: true, walking: true })).toBe('skill');
+  });
+});
 
 describe('nextFrameIndex', () => {
-  it('cycles idle frames over time', () => {
-    expect(nextFrameIndex({ reacting: false, tickCount: 0, frameCount: 2 })).toBe(0);
-    expect(nextFrameIndex({ reacting: false, tickCount: 1, frameCount: 2 })).toBe(1);
-    expect(nextFrameIndex({ reacting: false, tickCount: 2, frameCount: 2 })).toBe(0);
-  });
-  it('shows jump frame (last) while reacting', () => {
-    expect(nextFrameIndex({ reacting: true, tickCount: 0, frameCount: 2 })).toBe(1);
+  it('cycles frames within the current anim', () => {
+    expect(nextFrameIndex({ tickCount: 0, frameCount: 2 })).toBe(0);
+    expect(nextFrameIndex({ tickCount: 1, frameCount: 2 })).toBe(1);
+    expect(nextFrameIndex({ tickCount: 2, frameCount: 2 })).toBe(0);
   });
 });
 
@@ -1122,8 +1175,15 @@ Expected: FAIL.
 - [ ] **Step 3: pet-window.js의 nextFrameIndex 구현 + 브라우저 로직**
 
 ```js
-export function nextFrameIndex({ reacting, tickCount, frameCount }) {
-  if (reacting) return frameCount - 1; // jump = 마지막 프레임
+export function pickAnim({ reacting, skillActive, busy, walking }) {
+  if (reacting) return 'skill';   // 레벨업/진화 = skill 프레임 + 팝 텍스트
+  if (skillActive) return 'skill'; // 도구 사용 순간 기술
+  if (busy) return 'run';          // 프롬프트 진행 중 = 달리기
+  if (walking) return 'walk';      // 가끔 어슬렁
+  return 'idle';
+}
+
+export function nextFrameIndex({ tickCount, frameCount }) {
   return tickCount % frameCount;
 }
 
@@ -1133,15 +1193,18 @@ export function hudVisible({ hovering, pinned }) {
 ```
 
 브라우저 부분(모듈 하단, `typeof window !== 'undefined'` 가드): canvas 컨텍스트 얻어
-`imageSmoothingEnabled=false`, `window.pkmn.onState`로 state 수신 시 현재 종/단계
-스프라이트 선택. `requestAnimationFrame`(또는 setInterval)로 `nextFrameIndex`로 프레임
-골라 `drawFrame`. changes.leveledUp/evolved면 잠시 `reacting=true` + 텍스트 팝("Lv↑"/"진화!").
+`imageSmoothingEnabled=false`, `window.pkmn.onState`로 `{state, changes, activity}` 수신.
+상태머신: `activity.skillPulse` 수신 시 짧게 `skillActive=true`(예 500ms), `changes.leveledUp||evolved`면
+`reacting=true`(예 1.2s) + 팝 텍스트("Lv↑"/"진화!"), `walking`은 idle 중 가끔 토글, `busy`는
+`activity.busy`. 매 프레임 `anim = pickAnim({...})` → `getFrames(species, stage, anim)` →
+`nextFrameIndex`로 프레임 골라 `drawFrame`. `requestAnimationFrame`(또는 setInterval ~8fps).
 빈 영역 드래그로 창 이동(`-webkit-app-region: drag`).
 
 **HUD 노출 로직:** `mouseenter/mouseleave`로 `hovering` 토글, 캔버스 클릭으로 `pinned`
-토글. `hudVisible({hovering, pinned})`가 true면 XP바(`xp / xpForLevel(level+1)` 비율)와
-상태 텍스트(종·Lv·단계) 오버레이를 `opacity` 트랜지션으로 페이드인, false면 페이드아웃해
-평상시엔 스프라이트만 남긴다. HUD DOM은 `pointer-events` 처리로 드래그를 방해하지 않게 한다.
+토글. `hudVisible({hovering, pinned})`가 true면 XP바(현재 레벨 구간 진행도 =
+`(xp - xpForLevel(level)) / (xpForLevel(level+1) - xpForLevel(level))`)와 상태 텍스트
+(종·Lv·단계) 오버레이를 `opacity` 트랜지션으로 페이드인, false면 페이드아웃해 평상시엔
+스프라이트만 남긴다. HUD DOM은 `pointer-events` 처리로 드래그를 방해하지 않게 한다.
 
 - [ ] **Step 4: pet-window.html 작성**
 
