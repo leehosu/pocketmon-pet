@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   existsSync, statSync, openSync, readSync, closeSync, readdirSync, readFileSync,
+  writeFileSync, mkdirSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 
@@ -22,6 +23,7 @@ const IDLE_MOVE_CHANCE = 0.15;
 // 첫 실행 시 몇 달치 세션 로그를 한꺼번에 XP로 소급 반영하지 않도록,
 // lastSessionTs가 없으면(0) "최근 24시간"만 소급 범위로 삼는다.
 const FIRST_RUN_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
+const OFFSET_FILE = 'offset';
 
 // 16x16 포켓볼 스타일 트레이 아이콘(외부 에셋 없이 인라인 PNG로 제공).
 const TRAY_ICON_PNG_BASE64 =
@@ -36,14 +38,34 @@ let state = null;
 
 // ---- readEvents(): hook이 append하는 서명된 events.jsonl을 증분 읽기 + 검증 ----
 // 서명(sig)이 없거나 위조된 이벤트는 조용히 버린다(치팅 방지) — 앱이 XP의 유일한 권위.
+// 오프셋은 별도 파일(~/.pocketmon/offset)에 영속한다 — in-memory면 재시작마다
+// events.jsonl 전체를 재replay해 stale busy가 되살아나고 파일이 무한 성장한다.
 let eventsOffset = 0;
+
+function offsetPath() { return join(dataDir(), OFFSET_FILE); }
+
+function loadOffset() {
+  const file = offsetPath();
+  if (!existsSync(file)) return 0;
+  try {
+    const n = parseInt(readFileSync(file, 'utf8').trim(), 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch { return 0; }
+}
+
+function saveOffset(n) {
+  try {
+    mkdirSync(dataDir(), { recursive: true });
+    writeFileSync(offsetPath(), String(n));
+  } catch { /* 오프셋 영속 실패는 다음 tick에 재시도 — 치명적 아님 */ }
+}
 
 function readEvents() {
   const file = join(dataDir(), EVENTS_FILE);
   if (!existsSync(file)) return [];
   let stat;
   try { stat = statSync(file); } catch { return []; }
-  if (stat.size < eventsOffset) eventsOffset = 0; // 파일이 회전/축소됨 → 처음부터 재시작
+  if (stat.size < eventsOffset) { eventsOffset = 0; saveOffset(0); } // 회전/축소 → 처음부터
   if (stat.size <= eventsOffset) return [];
 
   const length = stat.size - eventsOffset;
@@ -59,6 +81,7 @@ function readEvents() {
   if (lastNewline === -1) return []; // 아직 완결된 줄이 없음 — 다음 tick에 재시도
   const complete = chunk.slice(0, lastNewline);
   eventsOffset += Buffer.byteLength(chunk.slice(0, lastNewline + 1), 'utf8');
+  saveOffset(eventsOffset); // 소비한 라인 지점을 영속 → 재시작 후엔 새 이벤트만 읽는다
 
   const out = [];
   for (const line of complete.split('\n')) {
@@ -197,6 +220,7 @@ app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.hide();
 
   const dir = dataDir();
+  eventsOffset = loadOffset(); // 영속된 오프셋부터 재개(재시작 시 전체 replay 방지)
   state = ensureStarter(loadState(dir), Math.random);
   state = { ...state, busy: false }; // 재시작 잔여 busy 무시
   saveState(dir, state);

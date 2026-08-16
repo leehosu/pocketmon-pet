@@ -27,6 +27,32 @@ describe('tick', () => {
     expect(changes.reactions).toBe(1);
   });
 
+  it('advances lastSessionTs only from session events, not hook ts', () => {
+    const state = { ...defaultState(), species: 'electric', locked: true, dailyDate: '2026-08-16' };
+    // hook ts(=현재 ms류)가 매우 크더라도 session 이벤트가 없으면 커서는 오르지 않아야 한다.
+    const r = tick({
+      state,
+      readEvents: () => [{ id: 'h1', kind: 'toolUse', ts: 9999999 }],
+      readSessionEvents: () => [],
+      today: '2026-08-16',
+    });
+    expect(r.state.lastSessionTs).toBe(0);
+  });
+
+  it('advances lastSessionTs to the max session event ts', () => {
+    const state = { ...defaultState(), species: 'electric', locked: true, dailyDate: '2026-08-16' };
+    const r = tick({
+      state,
+      readEvents: () => [{ id: 'h1', kind: 'toolUse', ts: 500 }],
+      readSessionEvents: () => [
+        { id: 's1', kind: 'tokens', tokens: 1000, ts: 30 },
+        { id: 's2', kind: 'tokens', tokens: 1000, ts: 42 },
+      ],
+      today: '2026-08-16',
+    });
+    expect(r.state.lastSessionTs).toBe(42);
+  });
+
   it('derives busy activity from busyStart/busyEnd and skillPulse from toolUse', () => {
     const base = { ...defaultState(), species: 'electric', locked: true, dailyDate: '2026-08-16' };
     // busyStart → busy true, toolUse → skillPulse true
