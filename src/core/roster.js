@@ -14,6 +14,7 @@ export function getSpeciesByKey(key) {
 }
 
 export function stageForLevel(species, level) {
+  if (!species) return 0;
   const [e1, e2] = species.evolveLevels;
   if (level >= e2) return 2;
   if (level >= e1) return 1;

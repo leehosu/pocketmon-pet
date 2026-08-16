@@ -19,4 +19,8 @@ describe('roster', () => {
     expect(stageForLevel(s, 25)).toBe(2);  // 라이츄
     expect(stageForLevel(s, 99)).toBe(2);
   });
+
+  it('returns stage 0 for an unknown/undefined species', () => {
+    expect(stageForLevel(undefined, 50)).toBe(0);
+  });
 });
