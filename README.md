@@ -131,11 +131,13 @@ XP는 두 경로로 들어옵니다 (`src/core/xp-engine.js`):
 npx vitest run   # 또는 npm test
 ```
 
-## 포켓몬 스프라이트 출처
+## 포켓몬 스프라이트 · 울음소리 출처
 
 - 포켓몬 스프라이트는 앱에 **번들하지 않고**, 공개 [PokéAPI/sprites](https://github.com/PokeAPI/sprites)에서
   **런타임에 내려받아** `~/.pocketmon/sprites/`에 로컬 캐시한다. (트레이 메뉴 "포켓몬 스프라이트 받기"
   또는 실행 시 현재 종의 진화 라인 자동 다운로드. 오프라인·실패 시 내장 오리지널 도트로 폴백.)
+- 울음소리도 동일하게 공개 [PokéAPI/cries](https://github.com/PokeAPI/cries)에서 런타임에 받아
+  `~/.pocketmon/cries/`에 캐시하고, 펫을 클릭하면 재생한다(앱 번들 미포함).
 - 직접 넣은 `~/.pocketmon/sprites/*.png`가 있으면 그 이미지가 우선한다.
 
 ## 저작권 고지
