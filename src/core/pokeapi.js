@@ -28,3 +28,9 @@ export function spriteUrl(dexId) {
 export function cryUrl(dexId) {
   return `${CRY_BASE}/${dexId}.ogg`;
 }
+
+// 기술(무브) 데이터도 앱에 넣지 않고 공개 PokéAPI에서 런타임에 조회한다.
+export const API_BASE = 'https://pokeapi.co/api/v2';
+export function pokemonUrl(dexId) { return `${API_BASE}/pokemon/${dexId}`; }
+export function typeUrl(typeName) { return `${API_BASE}/type/${typeName}`; }
+export function moveUrl(name) { return `${API_BASE}/move/${name}`; }

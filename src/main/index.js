@@ -14,7 +14,7 @@ import { getSpeciesByKey, canEvolve } from '../core/roster.js';
 import { parseSessionLines } from '../core/session-parser.js';
 import { tick, ensureStarter } from './orchestrator.js';
 import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
-import { dexLine, spriteUrl, cryUrl } from '../core/pokeapi.js';
+import { dexLine, spriteUrl, cryUrl, pokemonUrl, typeUrl, moveUrl } from '../core/pokeapi.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -58,6 +58,7 @@ let driftDir = 1;
 let state = null;
 let lastManualMoveAt = 0;
 let lastCrySig = null; // 렌더러에 마지막으로 보낸 울음소리(종_단계) 시그니처
+let lastMovesSig = null; // 렌더러에 마지막으로 보낸 기술목록(종) 시그니처
 
 // ---- readEvents(): hook이 append하는 서명된 events.jsonl을 증분 읽기 + 검증 ----
 // 서명(sig)이 없거나 위조된 이벤트는 조용히 버린다(치팅 방지) — 앱이 XP의 유일한 권위.
@@ -266,6 +267,61 @@ function fetchSpeciesSprites(key) {
 }
 
 function criesDirPath() { return join(dataDir(), 'cries'); }
+function movesDirPath() { return join(dataDir(), 'moves'); }
+
+// 종 키 → 그 타입의 오리지널 이펙트 변형(실제 기술 4개에 번갈아 매핑).
+const MOVE_EFFECTS = {
+  grass: ['leaf', 'leaf_swirl'],
+  fire: ['fire', 'fire_breath'],
+  water: ['water', 'water_bubbles'],
+  electric: ['electric', 'electric_bolts'],
+};
+const prettify = (slug) => slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+// 그 종이 배우는 "타입 일치" 기술 4개의 실제 이름을 공개 PokéAPI에서 런타임 조회해
+// ~/.pocketmon/moves/<종>.json 에 캐시(앱/레포에 무브셋 미포함). 이펙트는 오리지널 타입 연출.
+// 실패/오프라인이면 캐시 없음 → 렌더러가 내장 기본 기술명으로 폴백.
+async function fetchMoves(species) {
+  try {
+    const line = dexLine(species);
+    if (!line.length) return;
+    const file = join(movesDirPath(), `${species}.json`);
+    if (existsSync(file)) return;
+    const [pk, ty] = await Promise.all([
+      fetch(pokemonUrl(line[0])).then((r) => r.json()),
+      fetch(typeUrl(species)).then((r) => r.json()),
+    ]);
+    const learnable = new Set((pk.moves || []).map((m) => m.move.name));
+    const typeMoves = (ty.moves || []).map((m) => m.name).filter((n) => learnable.has(n)).slice(0, 4);
+    const variants = MOVE_EFFECTS[species] || ['leaf'];
+    const out = [];
+    for (let i = 0; i < typeMoves.length; i++) {
+      let label = prettify(typeMoves[i]);
+      try {
+        const mv = await fetch(moveUrl(typeMoves[i])).then((r) => r.json());
+        const ko = (mv.names || []).find((n) => n.language && n.language.name === 'ko');
+        if (ko && ko.name) label = ko.name;
+      } catch { /* 이름 로컬라이즈 실패 → 영문 프리티 */ }
+      out.push({ name: label, effect: variants[i % variants.length] });
+    }
+    if (out.length) {
+      mkdirSync(movesDirPath(), { recursive: true });
+      writeFileSync(file, JSON.stringify(out));
+    }
+  } catch { /* 실패 → 폴백(내장 기술명) */ }
+}
+
+// 종이 바뀌었고 무브 캐시가 준비되면 payload에 moves를 실어 렌더러에 전달(매 tick 방지).
+function attachMoves(payload) {
+  if (!state || !state.hatched || !state.species) return;
+  if (state.species === lastMovesSig) return;
+  try {
+    const file = join(movesDirPath(), `${state.species}.json`);
+    if (!existsSync(file)) return;
+    payload.moves = JSON.parse(readFileSync(file, 'utf8'));
+    lastMovesSig = state.species;
+  } catch { /* ignore */ }
+}
 
 // 현재(부화 후) 종·단계의 울음소리를 data URL로 읽음(없으면 null).
 function cryDataUrl(species, stage) {
@@ -336,6 +392,7 @@ function runTick() {
   const customSprites = refreshCustomSpritesIfChanged();
   if (customSprites) result.customSprites = customSprites; // 최초 1회 + 변경 시에만 포함
   attachCry(result); // 종/단계 바뀌었고 파일 준비되면 울음소리 data URL 전달
+  attachMoves(result); // 종 바뀌었고 무브 캐시 준비되면 실제 기술명 전달
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('state', result);
   }
@@ -379,6 +436,7 @@ function broadcastState(changes) {
     activity: { busy: Boolean(state?.busy), skillPulse: false },
   };
   attachCry(payload);
+  attachMoves(payload);
   mainWindow.webContents.send('state', payload);
 }
 
@@ -420,8 +478,8 @@ app.whenReady().then(() => {
   state = { ...state, busy: false }; // 재시작 잔여 busy 무시
   saveState(dir, state);
 
-  // 이미 부화한 경우에만 실제 스프라이트를 PokéAPI에서 캐시(없을 때만, 비동기).
-  if (state.hatched && state.species) fetchSpeciesSprites(state.species);
+  // 이미 부화한 경우에만 실제 스프라이트·기술을 PokéAPI에서 캐시(없을 때만, 비동기).
+  if (state.hatched && state.species) { fetchSpeciesSprites(state.species); fetchMoves(state.species); }
 
   // 렌더러의 수동 드래그 → 창 이동. 네이티브 -webkit-app-region:drag 대신 이 경로를 쓴다
   // (그래야 캔버스 클릭=핀 토글이 드래그 히트테스트에 먹히지 않는다).
@@ -453,6 +511,7 @@ app.whenReady().then(() => {
     state = { ...state, hatched: true };
     saveState(dataDir(), state);
     fetchSpeciesSprites(state.species); // 부화한 종의 실제 스프라이트 받기
+    fetchMoves(state.species);           // 실제 타입 기술명 받기
     playSkillEffect('hatch');            // 화면 전체 부화 연출
     broadcastState({ hatched: true });
   });

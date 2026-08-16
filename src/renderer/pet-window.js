@@ -142,6 +142,7 @@ if (typeof window !== 'undefined') {
   const customImages = new Map(); // key -> HTMLImageElement
   let customKeys = new Set();     // 로드된(로드 시도된) key 집합
   let currentCry = null;          // 현재 종/단계 울음소리 data URL(PokéAPI 런타임 캐시)
+  let currentMoves = null;        // 실제 타입 기술명(PokéAPI 런타임) — 없으면 내장 기본으로 폴백
 
   // 애니메이션/상호작용 상태
   let hovering = false;
@@ -185,8 +186,9 @@ if (typeof window !== 'undefined') {
 
   function applyState(payload) {
     latest = payload;
-    const { state, changes, activity, command, customSprites, cry } = payload;
+    const { state, changes, activity, command, customSprites, cry, moves } = payload;
     if (cry) currentCry = cry; // 종/단계 바뀔 때만 실려옴 → 저장
+    if (moves) currentMoves = moves; // 실제 타입 기술명(종 바뀔 때만)
 
     if (customSprites) {
       // 변경분이 실려온 tick — (재)로드. 로드 실패 시 해당 key는 캐시에 안 잡히므로
@@ -268,7 +270,8 @@ if (typeof window !== 'undefined') {
     if (!state) return;
     const species = getSpeciesByKey(state.species);
     const d = statusDetail(state, species, xpForLevel, XP_RULES.dailyCap);
-    const skills = skillsFor(species);
+    // 실제 PokéAPI 타입 기술명이 있으면 그걸, 없으면 내장 기본 기술로 폴백.
+    const skills = (currentMoves && currentMoves.length) ? currentMoves : skillsFor(species);
     const skillBtns = skills
       .map((s) => `<button class="skill-btn" data-effect="${s.effect}">${s.name}</button>`)
       .join('');

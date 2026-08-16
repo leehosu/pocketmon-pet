@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { dexLine, spriteUrl, cryUrl, SPRITE_BASE, CRY_BASE } from '../src/core/pokeapi.js';
+import {
+  dexLine, spriteUrl, cryUrl, pokemonUrl, typeUrl, moveUrl,
+  SPRITE_BASE, CRY_BASE, API_BASE,
+} from '../src/core/pokeapi.js';
 
 describe('pokeapi', () => {
   it('maps each species key to its 3-stage national dex line', () => {
@@ -22,5 +25,12 @@ describe('pokeapi', () => {
   it('builds a PokeAPI cries URL for a dex id', () => {
     expect(cryUrl(25)).toBe(`${CRY_BASE}/25.ogg`);
     expect(CRY_BASE.startsWith('https://')).toBe(true);
+  });
+
+  it('builds REST API URLs (pokemon/type/move)', () => {
+    expect(pokemonUrl(25)).toBe(`${API_BASE}/pokemon/25`);
+    expect(typeUrl('electric')).toBe(`${API_BASE}/type/electric`);
+    expect(moveUrl('thunderbolt')).toBe(`${API_BASE}/move/thunderbolt`);
+    expect(API_BASE.startsWith('https://')).toBe(true);
   });
 });
