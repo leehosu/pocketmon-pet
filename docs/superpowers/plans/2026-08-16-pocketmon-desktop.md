@@ -1,0 +1,1020 @@
+# 포켓몬 데스크톱 마스콧 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Claude Code로 코딩할수록 경험치가 쌓여 레벨업·진화하는 8비트 포켓몬 데스크톱 마스콧 앱을 만든다.
+
+**Architecture:** Electron 앱. 순수 로직(core: xp-engine, roster, store)을 UI/Electron과 분리해 Node에서 단위 테스트한다. Claude Code Hook과 세션 로그 파서가 XP 이벤트를 생성하고, 투명 플로팅 창(renderer)이 canvas로 8비트 스프라이트를 렌더한다. 세이브는 홈 디렉터리(`~/.pocketmon/`)에 두어 앱 재설치와 무관하게 유지한다.
+
+**Tech Stack:** Node.js, Electron, Vitest(테스트), HTML Canvas 2D.
+
+**Spec:** `docs/superpowers/specs/2026-08-16-pocketmon-desktop-design.md`
+
+## Global Constraints
+
+- 세이브·이벤트 파일은 반드시 `~/.pocketmon/`(홈 디렉터리)에 저장 — 앱 번들 내부 금지(재설치 유지 요건).
+- core 모듈(`src/core/**`)은 Electron API에 의존하지 않는 순수 Node 모듈 — Vitest로 테스트 가능해야 함.
+- 로스터 4종·진화 곡선은 `src/core/roster.js` 상수로 분리 — 하드코딩 산재 금지.
+- 스프라이트는 외부 이미지 파일 없이 JS 색상 매트릭스(팔레트 인덱스)로 정의.
+- 뽑기는 1회성 영구 지정: 한 번 `locked`되면 재추첨 불가.
+- 이벤트 dedup은 이벤트 `id` 기준.
+- 진화 레벨 기본값: 풀 16/32, 불 16/36, 물 18/30, 전기 10/25.
+- 레벨업 필요 누적 XP 곡선: 레벨 L 도달에 필요한 누적 XP = `floor(100 * L^1.5)`.
+
+---
+
+### Task 1: 프로젝트 스캐폴딩 + 로스터 데이터
+
+**Files:**
+- Create: `package.json`
+- Create: `src/core/roster.js`
+- Create: `.gitignore`
+- Test: `test/roster.test.js`
+
+**Interfaces:**
+- Produces:
+  - `ROSTER`: 배열. 각 원소 `{ key: string, type: '풀'|'불'|'물'|'전기', stages: [{name: string}, {name}, {name}], evolveLevels: [number, number] }`. 4종.
+  - `getSpeciesByKey(key: string) -> species | undefined`
+  - `stageForLevel(species, level: number) -> number` (0|1|2, 진화 단계 인덱스)
+
+- [ ] **Step 1: package.json 작성**
+
+```json
+{
+  "name": "pocketmon-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "vitest": "^2.0.0"
+  }
+}
+```
+
+- [ ] **Step 2: .gitignore 작성**
+
+```
+node_modules/
+dist/
+.DS_Store
+```
+
+- [ ] **Step 3: 의존성 설치**
+
+Run: `cd /Users/ihosu/git/lake/pocketmon-desktop && npm install`
+Expected: node_modules 생성, 에러 없음.
+
+- [ ] **Step 4: 실패하는 테스트 작성** (`test/roster.test.js`)
+
+```js
+import { describe, it, expect } from 'vitest';
+import { ROSTER, getSpeciesByKey, stageForLevel } from '../src/core/roster.js';
+
+describe('roster', () => {
+  it('has 4 species with 3 stages each', () => {
+    expect(ROSTER).toHaveLength(4);
+    for (const s of ROSTER) expect(s.stages).toHaveLength(3);
+  });
+
+  it('looks up species by key', () => {
+    expect(getSpeciesByKey('electric').stages[0].name).toBe('피츄');
+    expect(getSpeciesByKey('nope')).toBeUndefined();
+  });
+
+  it('maps level to evolution stage (electric evolves at 10/25)', () => {
+    const s = getSpeciesByKey('electric');
+    expect(stageForLevel(s, 1)).toBe(0);   // 피츄
+    expect(stageForLevel(s, 10)).toBe(1);  // 피카츄
+    expect(stageForLevel(s, 25)).toBe(2);  // 라이츄
+    expect(stageForLevel(s, 99)).toBe(2);
+  });
+});
+```
+
+- [ ] **Step 5: 테스트 실패 확인**
+
+Run: `npx vitest run test/roster.test.js`
+Expected: FAIL — roster.js 모듈 없음.
+
+- [ ] **Step 6: roster.js 구현**
+
+```js
+export const ROSTER = [
+  { key: 'grass', type: '풀', evolveLevels: [16, 32],
+    stages: [{ name: '치코리타' }, { name: '베이리프' }, { name: '메가니움' }] },
+  { key: 'fire', type: '불', evolveLevels: [16, 36],
+    stages: [{ name: '브케인' }, { name: '마그케인' }, { name: '블레이범' }] },
+  { key: 'water', type: '물', evolveLevels: [18, 30],
+    stages: [{ name: '리아코' }, { name: '엘리게이' }, { name: '장크로다일' }] },
+  { key: 'electric', type: '전기', evolveLevels: [10, 25],
+    stages: [{ name: '피츄' }, { name: '피카츄' }, { name: '라이츄' }] },
+];
+
+export function getSpeciesByKey(key) {
+  return ROSTER.find((s) => s.key === key);
+}
+
+export function stageForLevel(species, level) {
+  const [e1, e2] = species.evolveLevels;
+  if (level >= e2) return 2;
+  if (level >= e1) return 1;
+  return 0;
+}
+```
+
+- [ ] **Step 7: 테스트 통과 확인**
+
+Run: `npx vitest run test/roster.test.js`
+Expected: PASS.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git init && git add -A && git commit -m "feat: 프로젝트 스캐폴딩 + 로스터 데이터"
+```
+
+---
+
+### Task 2: XP 엔진 (순수 로직)
+
+**Files:**
+- Create: `src/core/xp-engine.js`
+- Test: `test/xp-engine.test.js`
+
+**Interfaces:**
+- Consumes: `roster.js`의 `getSpeciesByKey`, `stageForLevel`.
+- Produces:
+  - `xpForLevel(level: number) -> number` — 해당 레벨 **도달**에 필요한 누적 XP = `floor(100 * level^1.5)`.
+  - `levelForXp(xp: number) -> number` — 누적 XP로 현재 레벨 계산(최소 1).
+  - `XP_RULES`: `{ perToolUse: 2, perSessionStart: 5, perTokens: 1, tokensUnit: 1000, dailyCap: 500 }` (상수).
+  - `applyEvents(state, events, opts) -> { state, changes }` — 이벤트 배열을 누적. `state`는 `{ species, level, xp, stage, dailyXp, dailyDate, seenIds }`. `changes`는 `{ leveledUp: bool, evolved: bool, xpGained: number, reactions: number }`. `events` 원소: `{ id, kind: 'toolUse'|'sessionStart'|'tokens', tokens?, ts }`. `opts.today`(YYYY-MM-DD)로 일일 상한 리셋 판정. 이미 본 id·dailyCap 초과분은 제외.
+
+- [ ] **Step 1: 실패하는 테스트 작성** (`test/xp-engine.test.js`)
+
+```js
+import { describe, it, expect } from 'vitest';
+import { xpForLevel, levelForXp, applyEvents, XP_RULES } from '../src/core/xp-engine.js';
+
+const base = () => ({ species: 'electric', level: 1, xp: 0, stage: 0,
+  dailyXp: 0, dailyDate: '2026-08-16', seenIds: [] });
+
+describe('xp curve', () => {
+  it('xpForLevel grows super-linearly', () => {
+    expect(xpForLevel(1)).toBe(100);
+    expect(xpForLevel(4)).toBe(800);
+    expect(xpForLevel(9)).toBe(2700);
+  });
+  it('levelForXp inverts the curve', () => {
+    expect(levelForXp(0)).toBe(1);
+    expect(levelForXp(800)).toBe(4);
+    expect(levelForXp(2699)).toBe(8);
+  });
+});
+
+describe('applyEvents', () => {
+  it('adds tool-use xp and reacts', () => {
+    const { state, changes } = applyEvents(base(),
+      [{ id: 'a', kind: 'toolUse', ts: 1 }], { today: '2026-08-16' });
+    expect(state.xp).toBe(XP_RULES.perToolUse);
+    expect(changes.reactions).toBe(1);
+  });
+  it('dedups seen ids', () => {
+    let s = base();
+    ({ state: s } = applyEvents(s, [{ id: 'a', kind: 'toolUse', ts: 1 }], { today: '2026-08-16' }));
+    const { state } = applyEvents(s, [{ id: 'a', kind: 'toolUse', ts: 1 }], { today: '2026-08-16' });
+    expect(state.xp).toBe(XP_RULES.perToolUse); // unchanged
+  });
+  it('converts tokens to xp with unit', () => {
+    const { state } = applyEvents(base(),
+      [{ id: 't', kind: 'tokens', tokens: 3000, ts: 1 }], { today: '2026-08-16' });
+    expect(state.xp).toBe(3); // 3000/1000 * 1
+  });
+  it('enforces daily cap', () => {
+    const { state } = applyEvents(base(),
+      [{ id: 't', kind: 'tokens', tokens: 9_000_000, ts: 1 }], { today: '2026-08-16' });
+    expect(state.dailyXp).toBe(XP_RULES.dailyCap);
+  });
+  it('resets daily cap on new day', () => {
+    const s = { ...base(), dailyXp: XP_RULES.dailyCap, dailyDate: '2026-08-15' };
+    const { state } = applyEvents(s,
+      [{ id: 'x', kind: 'toolUse', ts: 1 }], { today: '2026-08-16' });
+    expect(state.dailyXp).toBe(XP_RULES.perToolUse);
+  });
+  it('detects level up and evolution', () => {
+    const s = { ...base(), xp: xpForLevel(9) };
+    const { state, changes } = applyEvents(s,
+      [{ id: 'big', kind: 'tokens', tokens: 1000, ts: 1 }], { today: '2026-08-16' });
+    expect(state.level).toBe(10);
+    expect(changes.leveledUp).toBe(true);
+    expect(state.stage).toBe(1);      // 피카츄
+    expect(changes.evolved).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: 테스트 실패 확인**
+
+Run: `npx vitest run test/xp-engine.test.js`
+Expected: FAIL — xp-engine.js 없음.
+
+- [ ] **Step 3: xp-engine.js 구현**
+
+```js
+import { getSpeciesByKey, stageForLevel } from './roster.js';
+
+export const XP_RULES = {
+  perToolUse: 2, perSessionStart: 5,
+  perTokens: 1, tokensUnit: 1000, dailyCap: 500,
+};
+
+export function xpForLevel(level) {
+  return Math.floor(100 * Math.pow(level, 1.5));
+}
+
+export function levelForXp(xp) {
+  let level = 1;
+  while (xp >= xpForLevel(level + 1)) level++;
+  return level;
+}
+
+function xpForEvent(e) {
+  if (e.kind === 'toolUse') return XP_RULES.perToolUse;
+  if (e.kind === 'sessionStart') return XP_RULES.perSessionStart;
+  if (e.kind === 'tokens') return Math.floor((e.tokens || 0) / XP_RULES.tokensUnit) * XP_RULES.perTokens;
+  return 0;
+}
+
+export function applyEvents(state, events, opts) {
+  const today = opts.today;
+  let s = { ...state, seenIds: [...state.seenIds] };
+  if (s.dailyDate !== today) { s.dailyDate = today; s.dailyXp = 0; }
+  const seen = new Set(s.seenIds);
+  const startLevel = s.level;
+  const startStage = s.stage;
+  let reactions = 0;
+
+  for (const e of events) {
+    if (seen.has(e.id)) continue;
+    seen.add(e.id);
+    s.seenIds.push(e.id);
+    let gain = xpForEvent(e);
+    const room = Math.max(0, XP_RULES.dailyCap - s.dailyXp);
+    gain = Math.min(gain, room);
+    if (gain <= 0 && e.kind !== 'toolUse' && e.kind !== 'sessionStart') continue;
+    s.xp += gain;
+    s.dailyXp += gain;
+    if (e.kind === 'toolUse' || e.kind === 'sessionStart') reactions++;
+  }
+
+  s.level = levelForXp(s.xp);
+  s.stage = stageForLevel(getSpeciesByKey(s.species), s.level);
+  const xpGained = s.xp - state.xp;
+
+  return {
+    state: s,
+    changes: {
+      leveledUp: s.level > startLevel,
+      evolved: s.stage > startStage,
+      xpGained,
+      reactions,
+    },
+  };
+}
+```
+
+- [ ] **Step 4: 테스트 통과 확인**
+
+Run: `npx vitest run test/xp-engine.test.js`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A && git commit -m "feat: XP 엔진 (레벨 곡선, dedup, 일일 상한, 진화 판정)"
+```
+
+---
+
+### Task 3: 세이브 저장소 + 뽑기(1회성 영구 지정)
+
+**Files:**
+- Create: `src/core/paths.js`
+- Create: `src/core/store.js`
+- Test: `test/store.test.js`
+
+**Interfaces:**
+- Consumes: `roster.js`의 `ROSTER`.
+- Produces (`store.js`):
+  - `defaultState() -> state` (Task 2 state 스키마 + `locked: false`, `rolledAt: null`).
+  - `loadState(dir) -> state` — 파일 없거나 손상 시 안전 기본값(손상 파일은 `.bak`으로 백업). locked 스타터는 최대한 보존.
+  - `saveState(dir, state) -> void`.
+  - `rollStarter(state, rng = Math.random) -> state` — `locked`가 false일 때만 랜덤 종 지정 후 `locked: true`, `rolledAt` 세팅. 이미 locked면 그대로 반환(재추첨 불가).
+- Produces (`paths.js`):
+  - `dataDir() -> string` — `~/.pocketmon` 절대경로.
+  - `SAVE_FILE`, `EVENTS_FILE` 상수(파일명).
+
+- [ ] **Step 1: 실패하는 테스트 작성** (`test/store.test.js`)
+
+```js
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { defaultState, loadState, saveState, rollStarter } from '../src/core/store.js';
+
+let dir;
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'pkmn-')); });
+
+describe('store', () => {
+  it('returns default state when no save file', () => {
+    const s = loadState(dir);
+    expect(s.locked).toBe(false);
+    expect(s.level).toBe(1);
+  });
+
+  it('round-trips save/load', () => {
+    const s = { ...defaultState(), species: 'fire', level: 5, xp: 999, locked: true };
+    saveState(dir, s);
+    expect(loadState(dir).xp).toBe(999);
+  });
+
+  it('recovers from corrupt save file', () => {
+    writeFileSync(join(dir, 'save.json'), '{not json');
+    const s = loadState(dir);
+    expect(s.level).toBe(1); // safe default, no throw
+  });
+
+  it('rolls a starter once and locks it', () => {
+    const s0 = defaultState();
+    const s1 = rollStarter(s0, () => 0); // deterministic → first species
+    expect(s1.locked).toBe(true);
+    expect(s1.species).toBe('grass');
+    // re-roll does nothing
+    const s2 = rollStarter(s1, () => 0.99);
+    expect(s2.species).toBe('grass');
+  });
+});
+```
+
+- [ ] **Step 2: 테스트 실패 확인**
+
+Run: `npx vitest run test/store.test.js`
+Expected: FAIL — store.js 없음.
+
+- [ ] **Step 3: paths.js 구현**
+
+```js
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+export const SAVE_FILE = 'save.json';
+export const EVENTS_FILE = 'events.jsonl';
+export function dataDir() { return join(homedir(), '.pocketmon'); }
+```
+
+- [ ] **Step 4: store.js 구현**
+
+```js
+import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { SAVE_FILE } from './paths.js';
+import { ROSTER } from './roster.js';
+
+export function defaultState() {
+  return {
+    species: null, level: 1, xp: 0, stage: 0,
+    dailyXp: 0, dailyDate: null, seenIds: [],
+    locked: false, rolledAt: null, lastActiveAt: null,
+  };
+}
+
+export function loadState(dir) {
+  const file = join(dir, SAVE_FILE);
+  if (!existsSync(file)) return defaultState();
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    return { ...defaultState(), ...parsed };
+  } catch {
+    try { renameSync(file, file + '.bak'); } catch { /* ignore */ }
+    return defaultState();
+  }
+}
+
+export function saveState(dir, state) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, SAVE_FILE), JSON.stringify(state, null, 2));
+}
+
+export function rollStarter(state, rng = Math.random) {
+  if (state.locked) return state;
+  const pick = ROSTER[Math.floor(rng() * ROSTER.length)];
+  return { ...state, species: pick.key, locked: true, rolledAt: Date.now() };
+}
+```
+
+- [ ] **Step 5: 테스트 통과 확인**
+
+Run: `npx vitest run test/store.test.js`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A && git commit -m "feat: 세이브 저장소 + 1회성 영구 뽑기"
+```
+
+---
+
+### Task 4: 세션 로그 파서
+
+**Files:**
+- Create: `src/core/session-parser.js`
+- Test: `test/session-parser.test.js`
+
+**Interfaces:**
+- Produces:
+  - `parseSessionLines(lines: string[], sinceTs = 0) -> events[]` — Claude Code 세션 jsonl 라인 배열에서 `tokens` 종류 XP 이벤트를 만든다. 각 라인은 JSON이며 assistant 메시지의 usage(예: `{ type:'assistant', uuid, timestamp, message:{ usage:{ input_tokens, output_tokens } } }`)를 가질 수 있다. 이벤트 `id`는 라인 `uuid`, `tokens`는 input+output 합, `ts`는 timestamp(ms). `sinceTs` 이하·usage 없는 라인·파싱 실패 라인은 제외.
+
+- [ ] **Step 1: 실패하는 테스트 작성** (`test/session-parser.test.js`)
+
+```js
+import { describe, it, expect } from 'vitest';
+import { parseSessionLines } from '../src/core/session-parser.js';
+
+const line = (uuid, ts, inTok, outTok) => JSON.stringify({
+  type: 'assistant', uuid, timestamp: new Date(ts).toISOString(),
+  message: { usage: { input_tokens: inTok, output_tokens: outTok } },
+});
+
+describe('parseSessionLines', () => {
+  it('extracts token events from assistant usage', () => {
+    const evs = parseSessionLines([line('u1', 1000, 100, 50)]);
+    expect(evs).toEqual([{ id: 'u1', kind: 'tokens', tokens: 150, ts: 1000 }]);
+  });
+  it('skips lines without usage and broken lines', () => {
+    const evs = parseSessionLines([
+      JSON.stringify({ type: 'user', uuid: 'x' }),
+      '{broken',
+      line('u2', 2000, 10, 10),
+    ]);
+    expect(evs).toEqual([{ id: 'u2', kind: 'tokens', tokens: 20, ts: 2000 }]);
+  });
+  it('filters events at or before sinceTs', () => {
+    const evs = parseSessionLines([line('u1', 1000, 5, 5), line('u2', 3000, 5, 5)], 1000);
+    expect(evs.map((e) => e.id)).toEqual(['u2']);
+  });
+});
+```
+
+- [ ] **Step 2: 테스트 실패 확인**
+
+Run: `npx vitest run test/session-parser.test.js`
+Expected: FAIL — session-parser.js 없음.
+
+- [ ] **Step 3: session-parser.js 구현**
+
+```js
+export function parseSessionLines(lines, sinceTs = 0) {
+  const out = [];
+  for (const raw of lines) {
+    let obj;
+    try { obj = JSON.parse(raw); } catch { continue; }
+    const usage = obj?.message?.usage;
+    if (!usage) continue;
+    const ts = Date.parse(obj.timestamp);
+    if (!Number.isFinite(ts) || ts <= sinceTs) continue;
+    const tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0);
+    if (tokens <= 0) continue;
+    out.push({ id: obj.uuid, kind: 'tokens', tokens, ts });
+  }
+  return out;
+}
+```
+
+- [ ] **Step 4: 테스트 통과 확인**
+
+Run: `npx vitest run test/session-parser.test.js`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A && git commit -m "feat: 세션 로그 파서 (토큰 usage → XP 이벤트)"
+```
+
+---
+
+### Task 5: Hook 스크립트 + 설치 안내
+
+**Files:**
+- Create: `hook/pocketmon-hook.js`
+- Create: `hook/install.md`
+- Test: `test/hook.test.js`
+
+**Interfaces:**
+- Consumes: `paths.js`의 `dataDir`, `EVENTS_FILE`.
+- Produces:
+  - `hook/pocketmon-hook.js` — stdin으로 Claude Code hook JSON을 받아 `~/.pocketmon/events.jsonl`에 한 줄 append. `buildEvent(hookInput, now, rand) -> event|null`를 export해 테스트한다. `hook_event_name`이 `SessionStart`면 `sessionStart`, `PostToolUse`면 `toolUse` 이벤트 생성. id는 `session_id` + event 종류 + 카운터/랜덤으로 유일하게.
+
+- [ ] **Step 1: 실패하는 테스트 작성** (`test/hook.test.js`)
+
+```js
+import { describe, it, expect } from 'vitest';
+import { buildEvent } from '../hook/pocketmon-hook.js';
+
+describe('buildEvent', () => {
+  it('maps SessionStart to sessionStart event', () => {
+    const e = buildEvent({ hook_event_name: 'SessionStart', session_id: 's1' }, 1000, () => 0.5);
+    expect(e.kind).toBe('sessionStart');
+    expect(e.ts).toBe(1000);
+    expect(typeof e.id).toBe('string');
+  });
+  it('maps PostToolUse to toolUse event', () => {
+    const e = buildEvent({ hook_event_name: 'PostToolUse', session_id: 's1' }, 2000, () => 0.5);
+    expect(e.kind).toBe('toolUse');
+  });
+  it('returns null for irrelevant events', () => {
+    expect(buildEvent({ hook_event_name: 'Nope' }, 1, () => 0)).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: 테스트 실패 확인**
+
+Run: `npx vitest run test/hook.test.js`
+Expected: FAIL — hook 모듈 없음.
+
+- [ ] **Step 3: pocketmon-hook.js 구현**
+
+```js
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { dataDir, EVENTS_FILE } from '../src/core/paths.js';
+
+const KIND = { SessionStart: 'sessionStart', PostToolUse: 'toolUse' };
+
+export function buildEvent(input, now, rand = Math.random) {
+  const kind = KIND[input?.hook_event_name];
+  if (!kind) return null;
+  const id = `${input.session_id || 'nosess'}:${kind}:${now}:${Math.floor(rand() * 1e9)}`;
+  return { id, kind, ts: now };
+}
+
+function main() {
+  let raw = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (c) => { raw += c; });
+  process.stdin.on('end', () => {
+    let input = {};
+    try { input = JSON.parse(raw); } catch { /* ignore */ }
+    const e = buildEvent(input, Date.now());
+    if (!e) process.exit(0);
+    const dir = dataDir();
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, EVENTS_FILE), JSON.stringify(e) + '\n');
+    process.exit(0);
+  });
+}
+
+// stdin이 연결된 실제 실행일 때만 main 구동 (테스트 import 시 실행 안 됨)
+if (process.argv[1] && process.argv[1].endsWith('pocketmon-hook.js')) main();
+```
+
+- [ ] **Step 4: install.md 작성**
+
+````markdown
+# Hook 설치
+
+`~/.claude/settings.json`의 hooks에 아래를 추가한다(경로는 이 레포 절대경로로):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/pocketmon-desktop/hook/pocketmon-hook.js" }] }
+    ],
+    "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/pocketmon-desktop/hook/pocketmon-hook.js" }] }
+    ]
+  }
+}
+```
+
+훅은 이벤트를 `~/.pocketmon/events.jsonl`에 append하며, 앱이 이를 감시해 반응한다.
+````
+
+- [ ] **Step 5: 테스트 통과 확인**
+
+Run: `npx vitest run test/hook.test.js`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A && git commit -m "feat: Claude Code hook 스크립트 + 설치 안내"
+```
+
+---
+
+### Task 6: 8비트 스프라이트 데이터 + 렌더러(순수 부분)
+
+**Files:**
+- Create: `src/core/sprites/palette.js`
+- Create: `src/core/sprites/index.js`
+- Create: `src/renderer/canvas-render.js`
+- Test: `test/sprites.test.js`
+
+**Interfaces:**
+- Produces:
+  - `palette.js`: `PALETTE` — 색상 hex 배열(인덱스 0 = 투명 `null`). 게임보이/8비트 톤 제한 세트.
+  - `sprites/index.js`: `SPRITES` — `{ [speciesKey]: [stage0Frames, stage1Frames, stage2Frames] }`. 각 stage는 프레임 배열, 각 프레임은 2D 숫자 매트릭스(팔레트 인덱스). 매트릭스는 정사각(예 16×16). 최소 idle 1프레임 + jump 1프레임. `getSprite(species, stage) -> frames[]`.
+  - `canvas-render.js`: `drawFrame(ctx, frame, palette, scale)` — 매트릭스를 canvas에 픽셀 사각형으로 그림(0/투명은 스킵).
+
+- [ ] **Step 1: 실패하는 테스트 작성** (`test/sprites.test.js`)
+
+```js
+import { describe, it, expect } from 'vitest';
+import { PALETTE } from '../src/core/sprites/palette.js';
+import { SPRITES, getSprite } from '../src/core/sprites/index.js';
+import { ROSTER } from '../src/core/roster.js';
+
+describe('sprites', () => {
+  it('every species has 3 stages of frames', () => {
+    for (const s of ROSTER) {
+      const stages = SPRITES[s.key];
+      expect(stages).toHaveLength(3);
+      for (const frames of stages) expect(frames.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+  it('all pixel indices are within palette range and frames are square', () => {
+    for (const key of Object.keys(SPRITES)) {
+      for (const frames of SPRITES[key]) {
+        for (const frame of frames) {
+          const n = frame.length;
+          for (const row of frame) {
+            expect(row).toHaveLength(n);
+            for (const idx of row) {
+              expect(idx).toBeGreaterThanOrEqual(0);
+              expect(idx).toBeLessThan(PALETTE.length);
+            }
+          }
+        }
+      }
+    }
+  });
+  it('getSprite returns frames for a species+stage', () => {
+    expect(getSprite('electric', 0).length).toBeGreaterThanOrEqual(1);
+  });
+});
+```
+
+- [ ] **Step 2: 테스트 실패 확인**
+
+Run: `npx vitest run test/sprites.test.js`
+Expected: FAIL — sprite 모듈 없음.
+
+- [ ] **Step 3: palette.js 구현**
+
+```js
+// index 0 = 투명. 나머지는 8비트 톤 제한 팔레트.
+export const PALETTE = [
+  null,       // 0 transparent
+  '#0f0f0f',  // 1 outline (near-black)
+  '#ffffff',  // 2 white
+  '#f8c838',  // 3 yellow
+  '#e08a1e',  // 4 orange
+  '#d13b27',  // 5 red
+  '#3a9e3a',  // 6 green
+  '#1e6bd1',  // 7 blue
+  '#7ac6ff',  // 8 light blue
+  '#8a5a2b',  // 9 brown
+  '#f0a8a8',  // 10 pink
+  '#b0b0b0',  // 11 gray
+];
+```
+
+- [ ] **Step 4: sprites/index.js 구현**
+
+여기서는 4종 × 3단계 매트릭스를 정의한다. 각 프레임은 16×16 숫자 2D 배열이며,
+idle 프레임과 jump 프레임(살짝 위로 이동/눌린 형태) 최소 2개를 둔다. 색인은
+`palette.js` 범위 내여야 한다. 아래는 **구조 예시**이며, 각 종·단계마다 실제로
+알아볼 수 있는 8비트 도트를 채워 넣는다(전기=노랑3/피부10, 불=주황4/빨강5,
+물=파랑7/8, 풀=초록6). 진화 단계가 오를수록 매트릭스에 디테일(꼬리·크기)을 추가.
+
+```js
+import { ROSTER } from '../roster.js';
+
+// 16x16 빈 프레임 헬퍼
+const O = () => Array.from({ length: 16 }, () => Array(16).fill(0));
+
+// 예: 전기 1단계(피츄) idle — 실제 구현에서 도트를 채운다.
+// (아래 electricPichuIdle 등은 알아볼 수 있는 형태로 손수 채운 매트릭스)
+// 각 종/단계 함수는 [idleFrame, jumpFrame] 반환.
+
+function placeholderPair(mainColor) {
+  // 임시 아님: 최소한의 알아볼 수 있는 둥근 몸통을 mainColor로 그린 idle/jump.
+  const idle = O();
+  for (let y = 5; y < 13; y++)
+    for (let x = 4; x < 12; x++) idle[y][x] = mainColor;
+  for (let y = 5; y < 13; y++) { idle[y][3] = 1; idle[y][12] = 1; }
+  for (let x = 4; x < 12; x++) { idle[4][x] = 1; idle[13][x] = 1; }
+  const jump = idle.map((row) => row.slice());
+  // jump: 한 픽셀 위로
+  jump.shift(); jump.push(Array(16).fill(0));
+  return [idle, jump];
+}
+
+const MAIN = { grass: 6, fire: 4, water: 7, electric: 3 };
+
+export const SPRITES = Object.fromEntries(
+  ROSTER.map((s) => [s.key, [
+    placeholderPair(MAIN[s.key]),          // stage 0
+    placeholderPair(MAIN[s.key]),          // stage 1 (구현 시 디테일 차별화)
+    placeholderPair(MAIN[s.key]),          // stage 2
+  ]]),
+);
+
+export function getSprite(species, stage) {
+  return SPRITES[species][stage];
+}
+```
+
+> 구현 노트: 위 `placeholderPair`는 테스트를 통과시키는 유효 매트릭스이지만,
+> 실제 작업에서는 각 포켓몬을 알아볼 수 있도록 종별 도트를 손수 그려 교체한다
+> (귀·꼬리·눈 등). 스프라이트 품질 향상은 이 태스크의 실제 산출물이다.
+
+- [ ] **Step 5: canvas-render.js 구현**
+
+```js
+export function drawFrame(ctx, frame, palette, scale) {
+  for (let y = 0; y < frame.length; y++) {
+    for (let x = 0; x < frame[y].length; x++) {
+      const c = palette[frame[y][x]];
+      if (!c) continue;
+      ctx.fillStyle = c;
+      ctx.fillRect(x * scale, y * scale, scale, scale);
+    }
+  }
+}
+```
+
+- [ ] **Step 6: 테스트 통과 확인**
+
+Run: `npx vitest run test/sprites.test.js`
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A && git commit -m "feat: 8비트 팔레트/스프라이트 데이터 + canvas 렌더"
+```
+
+---
+
+### Task 7: Electron main 프로세스 (창 + 트레이 + 오케스트레이션)
+
+**Files:**
+- Create: `src/main/index.js`
+- Create: `src/main/preload.js`
+- Create: `src/main/orchestrator.js`
+- Test: `test/orchestrator.test.js`
+
+**Interfaces:**
+- Consumes: `store.js`, `xp-engine.js`, `session-parser.js`, `paths.js`, `roster.js`.
+- Produces:
+  - `orchestrator.js`: `tick(deps) -> { state, changes }` — 순수하게 테스트 가능한 조율 함수. `deps = { state, readEvents(): event[], readSessionEvents(sinceTs): event[], today }`. events.jsonl 이벤트 + 세션 이벤트를 합쳐 `applyEvents`에 넘기고, 갱신 state와 changes 반환. 처음 실행(species=null·locked=false)이면 먼저 `rollStarter` 수행하도록 `ensureStarter(state, rng) -> state`도 export.
+  - `index.js`: Electron 앱 부트 — 투명·frameless·always-on-top BrowserWindow 생성, Tray 우클릭 메뉴(상태/뽑기연출/종료), 주기 tick으로 IPC push. (테스트 제외 — 수동 확인.)
+
+- [ ] **Step 1: 실패하는 테스트 작성** (`test/orchestrator.test.js`)
+
+```js
+import { describe, it, expect } from 'vitest';
+import { tick, ensureStarter } from '../src/main/orchestrator.js';
+import { defaultState } from '../src/core/store.js';
+
+describe('ensureStarter', () => {
+  it('rolls a starter when unlocked', () => {
+    const s = ensureStarter(defaultState(), () => 0);
+    expect(s.locked).toBe(true);
+    expect(s.species).toBe('grass');
+  });
+  it('keeps existing starter when locked', () => {
+    const locked = { ...defaultState(), species: 'fire', locked: true };
+    expect(ensureStarter(locked, () => 0).species).toBe('fire');
+  });
+});
+
+describe('tick', () => {
+  it('merges hook and session events and applies xp', () => {
+    const state = { ...defaultState(), species: 'electric', locked: true, dailyDate: '2026-08-16' };
+    const { state: next, changes } = tick({
+      state,
+      readEvents: () => [{ id: 'h1', kind: 'toolUse', ts: 1 }],
+      readSessionEvents: () => [{ id: 's1', kind: 'tokens', tokens: 2000, ts: 2 }],
+      today: '2026-08-16',
+    });
+    expect(next.xp).toBe(2 + 2); // toolUse 2 + 2000/1000
+    expect(changes.reactions).toBe(1);
+  });
+});
+```
+
+- [ ] **Step 2: 테스트 실패 확인**
+
+Run: `npx vitest run test/orchestrator.test.js`
+Expected: FAIL — orchestrator.js 없음.
+
+- [ ] **Step 3: orchestrator.js 구현**
+
+```js
+import { applyEvents } from '../core/xp-engine.js';
+import { rollStarter } from '../core/store.js';
+
+export function ensureStarter(state, rng = Math.random) {
+  return state.locked ? state : rollStarter(state, rng);
+}
+
+export function tick(deps) {
+  const events = [
+    ...deps.readEvents(),
+    ...deps.readSessionEvents(deps.state.lastSessionTs || 0),
+  ];
+  const maxTs = events.reduce((m, e) => Math.max(m, e.ts || 0), deps.state.lastSessionTs || 0);
+  const { state, changes } = applyEvents(deps.state, events, { today: deps.today });
+  return { state: { ...state, lastSessionTs: maxTs, lastActiveAt: Date.now() }, changes };
+}
+```
+
+- [ ] **Step 4: 테스트 통과 확인**
+
+Run: `npx vitest run test/orchestrator.test.js`
+Expected: PASS.
+
+- [ ] **Step 5: index.js + preload.js 구현 (Electron, 수동 확인)**
+
+`index.js`: `app.whenReady()`에서 `loadState(dataDir())` → `ensureStarter` → `saveState`. 투명 BrowserWindow(`transparent:true, frame:false, alwaysOnTop:true, resizable:false, skipTaskbar:true`) 생성해 `pet-window.html` 로드. `Tray`로 우클릭 메뉴(상태 보기 / 뽑기 연출 / 종료). `setInterval`로 tick 실행: `readEvents`는 events.jsonl 읽고 처리한 라인은 잘라내거나 offset 기록, `readSessionEvents`는 `~/.claude/projects/**/*.jsonl` 최근 파일 파싱. tick 결과를 `webContents.send('state', ...)`로 renderer에 전달하고 `saveState`. preload.js는 `contextBridge`로 `onState(cb)` 노출.
+
+```js
+// preload.js
+import { contextBridge, ipcRenderer } from 'electron';
+contextBridge.exposeInMainWorld('pkmn', {
+  onState: (cb) => ipcRenderer.on('state', (_e, payload) => cb(payload)),
+});
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A && git commit -m "feat: Electron main + 조율(tick/ensureStarter)"
+```
+
+---
+
+### Task 8: 렌더러 펫 창 (표시 + 상호작용 + 연출)
+
+**Files:**
+- Create: `src/renderer/pet-window.html`
+- Create: `src/renderer/pet-window.js`
+- Test: `test/anim.test.js`
+
+**Interfaces:**
+- Consumes: `canvas-render.js`의 `drawFrame`, `sprites/index.js`, `palette.js`, `roster.js`.
+- Produces:
+  - `pet-window.js`:
+    - `nextFrameIndex(state) -> number` — 애니메이션 프레임 선택 순수 함수(idle 깜빡, react 중이면 jump).
+    - `hudVisible(ui) -> boolean` — HUD(XP바·상태창) 노출 여부 순수 함수. `ui = { hovering, pinned }`. 평상시(둘 다 false)엔 false, hover 중이거나 클릭으로 pin되면 true.
+  - 나머지(canvas 루프, `window.pkmn.onState` 구독, 드래그 이동, 레벨업/진화 팝 연출, hover/클릭 → HUD 토글)는 브라우저 동작 — 수동 확인.
+
+**UX 요건:** 평상시에는 포켓몬 스프라이트만 보인다. 마우스를 올리면(hover) XP바+간단 상태(종/레벨)가 페이드인되고, 클릭하면 상세 상태창(누적 XP·다음 레벨까지·진화단계)이 pin되어 유지된다(다시 클릭하면 해제). 레벨업/진화 순간의 팝 연출은 HUD 상태와 무관하게 잠깐 표시된다.
+
+- [ ] **Step 1: 실패하는 테스트 작성** (`test/anim.test.js`)
+
+```js
+import { describe, it, expect } from 'vitest';
+import { nextFrameIndex, hudVisible } from '../src/renderer/pet-window.js';
+
+describe('nextFrameIndex', () => {
+  it('cycles idle frames over time', () => {
+    expect(nextFrameIndex({ reacting: false, tickCount: 0, frameCount: 2 })).toBe(0);
+    expect(nextFrameIndex({ reacting: false, tickCount: 1, frameCount: 2 })).toBe(1);
+    expect(nextFrameIndex({ reacting: false, tickCount: 2, frameCount: 2 })).toBe(0);
+  });
+  it('shows jump frame (last) while reacting', () => {
+    expect(nextFrameIndex({ reacting: true, tickCount: 0, frameCount: 2 })).toBe(1);
+  });
+});
+
+describe('hudVisible', () => {
+  it('hidden by default (sprite only)', () => {
+    expect(hudVisible({ hovering: false, pinned: false })).toBe(false);
+  });
+  it('shown on hover', () => {
+    expect(hudVisible({ hovering: true, pinned: false })).toBe(true);
+  });
+  it('shown when pinned by click even without hover', () => {
+    expect(hudVisible({ hovering: false, pinned: true })).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: 테스트 실패 확인**
+
+Run: `npx vitest run test/anim.test.js`
+Expected: FAIL.
+
+- [ ] **Step 3: pet-window.js의 nextFrameIndex 구현 + 브라우저 로직**
+
+```js
+export function nextFrameIndex({ reacting, tickCount, frameCount }) {
+  if (reacting) return frameCount - 1; // jump = 마지막 프레임
+  return tickCount % frameCount;
+}
+
+export function hudVisible({ hovering, pinned }) {
+  return Boolean(hovering || pinned);
+}
+```
+
+브라우저 부분(모듈 하단, `typeof window !== 'undefined'` 가드): canvas 컨텍스트 얻어
+`imageSmoothingEnabled=false`, `window.pkmn.onState`로 state 수신 시 현재 종/단계
+스프라이트 선택. `requestAnimationFrame`(또는 setInterval)로 `nextFrameIndex`로 프레임
+골라 `drawFrame`. changes.leveledUp/evolved면 잠시 `reacting=true` + 텍스트 팝("Lv↑"/"진화!").
+빈 영역 드래그로 창 이동(`-webkit-app-region: drag`).
+
+**HUD 노출 로직:** `mouseenter/mouseleave`로 `hovering` 토글, 캔버스 클릭으로 `pinned`
+토글. `hudVisible({hovering, pinned})`가 true면 XP바(`xp / xpForLevel(level+1)` 비율)와
+상태 텍스트(종·Lv·단계) 오버레이를 `opacity` 트랜지션으로 페이드인, false면 페이드아웃해
+평상시엔 스프라이트만 남긴다. HUD DOM은 `pointer-events` 처리로 드래그를 방해하지 않게 한다.
+
+- [ ] **Step 4: pet-window.html 작성**
+
+```html
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>
+  html,body{margin:0;background:transparent;overflow:hidden;-webkit-app-region:drag;}
+  canvas{image-rendering:pixelated;}
+  #pop{position:fixed;top:0;left:0;font:bold 12px monospace;color:#fff;
+       text-shadow:0 0 2px #000;pointer-events:none;}
+</style></head>
+<body>
+  <canvas id="pet" width="128" height="128"></canvas>
+  <div id="pop"></div>
+  <script type="module" src="./pet-window.js"></script>
+</body>
+</html>
+```
+
+- [ ] **Step 5: 테스트 통과 확인**
+
+Run: `npx vitest run test/anim.test.js`
+Expected: PASS.
+
+- [ ] **Step 6: 전체 테스트 실행**
+
+Run: `npx vitest run`
+Expected: 모든 테스트 PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A && git commit -m "feat: 렌더러 펫 창 (애니메이션/상호작용/연출)"
+```
+
+---
+
+### Task 9: 수동 통합 확인 + README
+
+**Files:**
+- Create: `README.md`
+
+**Interfaces:** 없음 (통합/문서).
+
+- [ ] **Step 1: 앱 실행 확인**
+
+Run: `npm start`
+Expected: 투명 창에 8비트 포켓몬 1마리 표시(최초 실행 시 랜덤 지정), 트레이 아이콘 등장.
+
+- [ ] **Step 2: XP 유입 확인**
+
+수동: `~/.pocketmon/events.jsonl`에 `{"id":"t1","kind":"tokens","tokens":300000,"ts":1}` 한 줄 추가 → 다음 tick에 레벨업/진화 연출이 뜨는지 확인.
+
+- [ ] **Step 3: 재설치 유지 확인**
+
+수동: 앱 종료 후 재실행 → 같은 포켓몬·레벨 유지. `~/.pocketmon/save.json` 존재 확인.
+
+- [ ] **Step 4: README 작성**
+
+설치(`npm install`), 실행(`npm start`), hook 등록(`hook/install.md` 링크), 초기화 방법(`~/.pocketmon/save.json` 삭제), 로스터·XP 규칙 요약을 담는다.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A && git commit -m "docs: README + 통합 확인"
+```
