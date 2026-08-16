@@ -321,29 +321,30 @@
       }
     } else if (effect === 'fire') {
       // 바닥 열기 글로우
-      const gg = ctx.createRadialGradient(W / 2, H, 0, W / 2, H, H * 0.7);
-      gg.addColorStop(0, `rgba(224,138,30,${alpha * 0.4})`);
+      const gg = ctx.createRadialGradient(W / 2, H, 0, W / 2, H, H * 0.85);
+      gg.addColorStop(0, `rgba(224,138,30,${alpha * 0.45})`);
       gg.addColorStop(1, 'rgba(224,138,30,0)');
       ctx.globalAlpha = 1; ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H);
 
       // 바닥 화염 띠: 겉불(빨강)→중간(주황)→속불(노랑) 3겹, additive로 겹쳐 화염 느낌
       ctx.globalCompositeOperation = 'lighter';
       const layers = [
-        { col: '#d13b27', hf: 1.0, w: 48, step: 26 },
-        { col: '#e08a1e', hf: 0.68, w: 34, step: 22 },
-        { col: '#f8c838', hf: 0.4, w: 22, step: 18 },
+        { col: '#d13b27', baseW: 80, hf: 0.46, step: 36 },
+        { col: '#e08a1e', baseW: 56, hf: 0.34, step: 30 },
+        { col: '#f8c838', baseW: 34, hf: 0.22, step: 24 },
       ];
       for (const L of layers) {
         ctx.fillStyle = L.col;
         for (let x = -L.step; x <= W + L.step; x += L.step) {
-          const flick = 0.6 + 0.3 * Math.sin(nowT * 12 + x * 0.15) + 0.2 * Math.sin(nowT * 26 + x);
-          const h = H * 0.32 * L.hf * Math.max(0.35, flick);
-          const w = L.w * (0.8 + 0.2 * Math.sin(nowT * 9 + x));
+          const fl = 0.5 + 0.3 * Math.sin(nowT * 11 + x * 0.05) + 0.2 * Math.sin(nowT * 19 + x * 0.13);
+          const h = H * L.hf * Math.max(0.4, fl);
+          const w = L.baseW * (0.85 + 0.15 * Math.sin(nowT * 5 + x));
+          const cxx = x + 6 * Math.sin(nowT * 7 + x); // 좌우로 살랑
           ctx.globalAlpha = alpha * 0.5;
           ctx.beginPath();
-          ctx.moveTo(x - w / 2, H);
-          ctx.quadraticCurveTo(x - w * 0.15, H - h * 0.55, x, H - h);        // 왼쪽 곡선 → 뾰족한 끝
-          ctx.quadraticCurveTo(x + w * 0.15, H - h * 0.55, x + w / 2, H);    // 오른쪽 곡선
+          ctx.moveTo(cxx - w / 2, H);
+          ctx.quadraticCurveTo(cxx - w * 0.28, H - h * 0.55, cxx, H - h);
+          ctx.quadraticCurveTo(cxx + w * 0.28, H - h * 0.55, cxx + w / 2, H);
           ctx.closePath();
           ctx.fill();
         }
