@@ -391,8 +391,8 @@
       ];
       // 각 획을 곧은 직선 위에 얹은 "이글이글 타오르는 불꽃 덩어리"로 그린다.
       // 중심은 직선(휘지 않음), 덩어리 크기만 시간+위치로 flicker → 불이 살아있게.
+      // additive 겹침으로 글로우를 내고 shadowBlur는 쓰지 않음(성능). 원 개수도 줄임.
       ctx.globalCompositeOperation = 'lighter';
-      ctx.shadowColor = '#ff6a3d'; ctx.shadowBlur = 16;
       for (let si = 0; si < strokes.length; si++) {
         const p = Math.min(1, Math.max(0, (nowT - si * 0.22) / 0.35)); // 획 순차 등장
         if (p <= 0) continue;
@@ -401,19 +401,17 @@
         const ex = ax + (b[0] * S - a[0] * S) * p;
         const ey = ay + (b[1] * S - a[1] * S) * p;
         const len = Math.hypot(ex - ax, ey - ay);
-        const n = Math.max(2, Math.floor(len / 9));
+        const n = Math.max(2, Math.floor(len / 16));
         for (let k = 0; k <= n; k++) {
           const t = k / n;
           const x = ax + (ex - ax) * t, y = ay + (ey - ay) * t;
           const fl = 0.6 + 0.3 * Math.sin(nowT * 15 + k * 0.7 + si * 2) + 0.2 * Math.sin(nowT * 29 + k);
-          const base = 24 * Math.max(0.4, fl);
+          const base = 26 * Math.max(0.4, fl);
           ctx.globalAlpha = alpha * 0.5;
           ctx.fillStyle = '#d13b27'; ctx.beginPath(); ctx.arc(x, y, base, 0, TAU); ctx.fill();
-          ctx.fillStyle = '#e08a1e'; ctx.beginPath(); ctx.arc(x, y, base * 0.6, 0, TAU); ctx.fill();
-          ctx.fillStyle = '#f8c838'; ctx.beginPath(); ctx.arc(x, y, base * 0.3, 0, TAU); ctx.fill();
+          ctx.fillStyle = '#f8c838'; ctx.beginPath(); ctx.arc(x, y, base * 0.42, 0, TAU); ctx.fill();
         }
       }
-      ctx.shadowBlur = 0;
       // 획을 타고 오르는 불티
       for (const pt of parts) {
         const age = nowT - pt.delay;
