@@ -221,26 +221,50 @@
       }
     } else if (effect === 'fire') {
       // 바닥 열기 글로우
-      const gg = ctx.createRadialGradient(W / 2, H, 0, W / 2, H, H * 0.6);
-      gg.addColorStop(0, `rgba(224,138,30,${alpha * 0.35})`);
+      const gg = ctx.createRadialGradient(W / 2, H, 0, W / 2, H, H * 0.7);
+      gg.addColorStop(0, `rgba(224,138,30,${alpha * 0.4})`);
       gg.addColorStop(1, 'rgba(224,138,30,0)');
       ctx.globalAlpha = 1; ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H);
-      ctx.shadowColor = '#ff6a3d'; ctx.shadowBlur = 8; // 불티 글로우
+
+      // 바닥 화염 띠: 겉불(빨강)→중간(주황)→속불(노랑) 3겹, additive로 겹쳐 화염 느낌
+      ctx.globalCompositeOperation = 'lighter';
+      const layers = [
+        { col: '#d13b27', hf: 1.0, w: 48, step: 26 },
+        { col: '#e08a1e', hf: 0.68, w: 34, step: 22 },
+        { col: '#f8c838', hf: 0.4, w: 22, step: 18 },
+      ];
+      for (const L of layers) {
+        ctx.fillStyle = L.col;
+        for (let x = -L.step; x <= W + L.step; x += L.step) {
+          const flick = 0.6 + 0.3 * Math.sin(nowT * 12 + x * 0.15) + 0.2 * Math.sin(nowT * 26 + x);
+          const h = H * 0.32 * L.hf * Math.max(0.35, flick);
+          const w = L.w * (0.8 + 0.2 * Math.sin(nowT * 9 + x));
+          ctx.globalAlpha = alpha * 0.5;
+          ctx.beginPath();
+          ctx.moveTo(x - w / 2, H);
+          ctx.quadraticCurveTo(x - w * 0.15, H - h * 0.55, x, H - h);        // 왼쪽 곡선 → 뾰족한 끝
+          ctx.quadraticCurveTo(x + w * 0.15, H - h * 0.55, x + w / 2, H);    // 오른쪽 곡선
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+      // 위로 타오르는 불티 — 높이 오를수록 노랑→주황→빨강으로 식으며 사라짐
       for (const p of parts) {
         const age = nowT - p.delay;
         if (age < 0 || age > p.life) continue;
         const f = age / p.life;
         const y = H - f * p.vy * p.life * 3.2;
         const x = p.x + Math.sin(age * 6 + p.x) * p.drift * f;
-        ctx.globalAlpha = alpha * (1 - f);
-        ctx.fillStyle = p.c;
+        ctx.globalAlpha = alpha * (1 - f) * 0.9;
+        ctx.fillStyle = f < 0.35 ? '#f8c838' : (f < 0.7 ? '#e08a1e' : '#d13b27');
         ctx.beginPath();
-        ctx.arc(x, y, p.size * (1 - f * 0.6), 0, TAU);
+        ctx.arc(x, y, p.size * (1 - f * 0.7), 0, TAU);
         ctx.fill();
       }
-      ctx.shadowBlur = 0;
+      ctx.globalCompositeOperation = 'source-over';
     } else if (effect === 'fire_breath') {
       const ox = W / 2, oy = H + 10;
+      ctx.globalCompositeOperation = 'lighter'; // 겹치면 밝아지는 화염 느낌
       for (const p of parts) {
         const age = nowT - p.delay;
         if (age < 0 || age > p.life) continue;
@@ -248,12 +272,13 @@
         const d = p.speed * age;
         const x = ox + Math.cos(p.ang) * d;
         const y = oy - Math.sin(p.ang) * d;
-        ctx.globalAlpha = alpha * (1 - f) * 0.95;
-        ctx.fillStyle = p.c;
+        ctx.globalAlpha = alpha * (1 - f) * 0.9;
+        ctx.fillStyle = f < 0.35 ? '#f8c838' : (f < 0.7 ? '#e08a1e' : '#d13b27'); // 뻗을수록 식음
         ctx.beginPath();
         ctx.arc(x, y, p.size * (1 - f * 0.5), 0, TAU);
         ctx.fill();
       }
+      ctx.globalCompositeOperation = 'source-over';
     } else if (effect === 'water') {
       ctx.lineCap = 'round';
       for (const p of parts) {
