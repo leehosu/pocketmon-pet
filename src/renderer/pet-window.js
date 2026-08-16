@@ -27,10 +27,10 @@ export function hudVisible({ hovering, pinned }) {
 
 // 타입별 오리지널 기술 목록(공식 포켓몬 기술 아님). 각 기술은 이름 + 화면 이펙트 종류.
 const SKILLS_BY_KEY = {
-  grass: [{ name: '잎 흩날리기', effect: 'leaf' }, { name: '새싹 회오리', effect: 'leaf' }],
-  fire: [{ name: '불꽃 튀기기', effect: 'fire' }, { name: '화염 숨결', effect: 'fire' }],
-  water: [{ name: '물보라', effect: 'water' }, { name: '거품 세례', effect: 'water' }],
-  electric: [{ name: '스파크', effect: 'electric' }, { name: '번개 방출', effect: 'electric' }],
+  grass: [{ name: '잎 흩날리기', effect: 'leaf' }, { name: '새싹 회오리', effect: 'leaf_swirl' }],
+  fire: [{ name: '불꽃 튀기기', effect: 'fire' }, { name: '화염 숨결', effect: 'fire_breath' }],
+  water: [{ name: '물보라', effect: 'water' }, { name: '거품 세례', effect: 'water_bubbles' }],
+  electric: [{ name: '스파크', effect: 'electric' }, { name: '번개 방출', effect: 'electric_bolts' }],
 };
 
 // species(getSpeciesByKey 결과)에 맞는 기술 배열 반환. 없으면 빈 배열.

@@ -23,7 +23,12 @@ const DETAIL_WIDTH = 210;
 const DETAIL_HEIGHT = 320;
 // 기술 이펙트 오버레이 자동 종료 시간.
 const EFFECT_DURATION_MS = 2800;
-const EFFECT_TYPES = ['leaf', 'fire', 'water', 'electric'];
+const EFFECT_TYPES = [
+  'leaf', 'leaf_swirl',
+  'fire', 'fire_breath',
+  'water', 'water_bubbles',
+  'electric', 'electric_bolts',
+];
 const DRIFT_STEP_BUSY = 6; // 프롬프트 처리중(달리기) — 크게 움직임
 const DRIFT_STEP_IDLE = 1; // 평상시 — 가끔 조금만 움직임
 const IDLE_MOVE_CHANCE = 0.15;
