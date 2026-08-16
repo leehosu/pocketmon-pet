@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDir, EVENTS_FILE } from '../src/core/paths.js';
 import { sign } from '../src/core/integrity.js';
+import { getSecret } from '../src/core/secret.js';
 
 const KIND = {
   SessionStart: 'sessionStart',
@@ -10,12 +11,13 @@ const KIND = {
   Stop: 'busyEnd',               // 응답 종료 → idle/walk 복귀
 };
 
-export function buildEvent(input, now, rand = Math.random) {
+// secret 미지정 시 integrity 기본키(테스트용). 실제 실행에선 main이 로컬 키를 넘긴다.
+export function buildEvent(input, now, rand = Math.random, secret) {
   const kind = KIND[input?.hook_event_name];
   if (!kind) return null;
   const id = `${input.session_id || 'nosess'}:${kind}:${now}:${Math.floor(rand() * 1e9)}`;
   const core = { id, kind, ts: now };
-  return { ...core, sig: sign(core) }; // 앱이 검증할 서명(치팅 방지)
+  return { ...core, sig: sign(core, secret) }; // 앱이 검증할 서명(치팅 방지)
 }
 
 function main() {
@@ -25,9 +27,9 @@ function main() {
   process.stdin.on('end', () => {
     let input = {};
     try { input = JSON.parse(raw); } catch { /* ignore */ }
-    const e = buildEvent(input, Date.now());
-    if (!e) process.exit(0);
     const dir = dataDir();
+    const e = buildEvent(input, Date.now(), Math.random, getSecret(dir));
+    if (!e) process.exit(0);
     mkdirSync(dir, { recursive: true });
     appendFileSync(join(dir, EVENTS_FILE), JSON.stringify(e) + '\n');
     process.exit(0);

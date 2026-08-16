@@ -2,6 +2,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 // 로컬 데스크톱 앱이라 이 키는 바이너리에서 추출 가능 — 완전 비밀이 아니라
 // 수기 편집을 감지하는 "난독화 수준" 억지력이다(서버 권위 계산이 아님).
+// 개발/테스트용 기본키. 실제 실행에서는 store/hook/main이 secret.js의 로컬 키
+// (~/.pocketmon/secret.key, 레포에 없음)를 명시적으로 넘겨 서명·검증한다.
 export const SECRET = 'pkmn-desktop-v1-integrity-key-do-not-rely-as-real-secret';
 
 export function canonical(obj) {
