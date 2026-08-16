@@ -51,7 +51,7 @@
 
   function setup() {
     if (effect === 'leaf') {
-      for (let i = 0; i < 80; i++) parts.push({
+      for (let i = 0; i < 120; i++) parts.push({
         baseX: rand(0, W), y: rand(-H * 0.5, H * 0.4), vy: rand(40, 105),
         sway: rand(20, 55), freq: rand(0.5, 1.6), phase: rand(0, TAU),
         rot: rand(0, TAU), vrot: rand(-2.5, 2.5), size: rand(9, 20), c: pick(colors),
@@ -64,7 +64,7 @@
         size: rand(8, 18), c: pick(colors), yoff: rand(-40, 40),
       });
     } else if (effect === 'fire') {
-      for (let i = 0; i < 150; i++) parts.push({
+      for (let i = 0; i < 220; i++) parts.push({
         x: rand(0, W), delay: rand(0, 1.7), life: rand(0.8, 1.6),
         vy: rand(70, 190), drift: rand(-40, 40), size: rand(4, 11), c: pick(colors),
       });
@@ -75,7 +75,7 @@
         delay: rand(0, 1.0), life: rand(0.7, 1.4), size: rand(12, 30), c: pick(colors),
       });
     } else if (effect === 'water') {
-      for (let i = 0; i < 130; i++) parts.push({
+      for (let i = 0; i < 180; i++) parts.push({
         x: rand(0, W), delay: rand(0, 1.4), life: rand(0.5, 1.0),
         vy: rand(280, 620), len: rand(10, 26), c: pick(colors),
       });
@@ -88,7 +88,7 @@
       });
     } else if (effect === 'electric') {
       // 무작위 위치에서 깜빡이는 스파크 점
-      for (let i = 0; i < 70; i++) parts.push({
+      for (let i = 0; i < 110; i++) parts.push({
         x: rand(0, W), y: rand(0, H), size: rand(2, 6),
         on: rand(0, 1), blink: rand(6, 16), phase: rand(0, TAU), c: pick(colors),
       });
@@ -170,6 +170,15 @@
 
   let nowT = 0, elapsed = 0, startTs = null;
 
+  const isSkill = !['hatch', 'evolve'].includes(effect);
+  // juice: 임팩트 순간 화면 흔들림 세기(px)
+  function shakeFor() {
+    if (effect === 'hatch') return (nowT > 0.45 && nowT < 1.0) ? 4 : 0;
+    if (effect === 'evolve') return (nowT > 1.25 && nowT < 1.6) ? 6 : 0;
+    const strong = effect.endsWith('_bolts') || effect.endsWith('_breath') ? 1.9 : 1;
+    return Math.max(0, 1 - nowT / 0.8) * 3.2 * strong; // 시작 직후 강하게, 빠르게 감쇠
+  }
+
   function frame(ts) {
     if (startTs === null) startTs = ts;
     elapsed = ts - startTs;
@@ -181,6 +190,19 @@
     if (elapsed < FADE_IN) alpha = elapsed / FADE_IN;
     else if (elapsed > DURATION - FADE_OUT) alpha = Math.max(0, (DURATION - elapsed) / FADE_OUT);
     ctx.globalAlpha = alpha;
+
+    // 화면 흔들림 적용(전체 드로잉을 감싼다)
+    const shk = shakeFor();
+    ctx.save();
+    if (shk > 0.15) ctx.translate((Math.random() * 2 - 1) * shk, (Math.random() * 2 - 1) * shk);
+
+    // 시작 임팩트 플래시(기술 계열): 발동 순간 타입 색으로 화면을 짧게 번쩍
+    if (isSkill && elapsed < 130) {
+      ctx.globalAlpha = alpha * (1 - elapsed / 130) * 0.55;
+      ctx.fillStyle = colors[0];
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = alpha;
+    }
 
     if (effect === 'leaf') {
       for (const p of parts) {
@@ -198,6 +220,12 @@
         drawLeaf(x, y, p.rot, p.size, p.c);
       }
     } else if (effect === 'fire') {
+      // 바닥 열기 글로우
+      const gg = ctx.createRadialGradient(W / 2, H, 0, W / 2, H, H * 0.6);
+      gg.addColorStop(0, `rgba(224,138,30,${alpha * 0.35})`);
+      gg.addColorStop(1, 'rgba(224,138,30,0)');
+      ctx.globalAlpha = 1; ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H);
+      ctx.shadowColor = '#ff6a3d'; ctx.shadowBlur = 8; // 불티 글로우
       for (const p of parts) {
         const age = nowT - p.delay;
         if (age < 0 || age > p.life) continue;
@@ -210,6 +238,7 @@
         ctx.arc(x, y, p.size * (1 - f * 0.6), 0, TAU);
         ctx.fill();
       }
+      ctx.shadowBlur = 0;
     } else if (effect === 'fire_breath') {
       const ox = W / 2, oy = H + 10;
       for (const p of parts) {
@@ -236,6 +265,18 @@
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(p.x, y); ctx.lineTo(p.x, y + p.len);
+        ctx.stroke();
+      }
+      // 하단 물결 링(퍼짐)
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#7ac6ff';
+      for (let r = 0; r < 3; r++) {
+        const age = nowT - r * 0.35;
+        if (age < 0) continue;
+        const rad = (age % 0.9) * 280;
+        ctx.globalAlpha = alpha * Math.max(0, 0.5 - (age % 0.9) * 0.55);
+        ctx.beginPath();
+        ctx.ellipse(W * (0.3 + r * 0.2), H - 12, rad, rad * 0.28, 0, 0, TAU);
         ctx.stroke();
       }
     } else if (effect === 'water_bubbles') {
@@ -423,6 +464,7 @@
       }
     }
 
+    ctx.restore(); // shake 복원
     if (elapsed < DURATION) requestAnimationFrame(frame);
     else ctx.clearRect(0, 0, W, H);
   }
