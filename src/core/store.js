@@ -10,6 +10,7 @@ export function defaultState() {
     dailyXp: 0, dailyDate: null, seenIds: [],
     locked: false, rolledAt: null, lastActiveAt: null, lastSessionTs: 0,
     hatched: false, // 최초엔 알 상태. 부화("!" 클릭) 시에만 종이 랜덤 결정된다.
+    battleProfile: null,
   };
 }
 

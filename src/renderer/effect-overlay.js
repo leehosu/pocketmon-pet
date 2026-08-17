@@ -1,7 +1,16 @@
-// 화면 전체 기술 이펙트 — 전부 오리지널 canvas 파티클 애니메이션.
-// effect 종류를 쿼리로 받아 재생 후 페이드아웃. 종류별로 서로 다른 움직임.
+import { loadSpriteCutout } from './sprite-alpha.js';
+import { PokegoldAnimationRenderer } from './pokegold-anim-renderer.js';
+import { PokegoldAnimationVM } from './pokegold-anim-vm.js';
+
+// Gold 기술은 pret/pokegold VM으로, 부화/진화 연출은 기존 canvas 애니메이션으로 재생한다.
 (function () {
-  const effect = new URLSearchParams(location.search).get('effect') || 'leaf';
+  const query = new URLSearchParams(location.search);
+  const effect = query.get('effect') || 'leaf';
+  const spriteSource = query.get('sprite');
+  const isPreview = query.get('preview') === '1';
+  const frozenFrame = query.has('frame') ? Math.max(0, Number(query.get('frame')) || 0) : null;
+  const isPokegold = effect.startsWith('gsc_');
+  if (isPreview) document.documentElement.classList.add('preview');
   const canvas = document.getElementById('fx');
   const ctx = canvas.getContext('2d');
   let W = 0, H = 0;
@@ -13,6 +22,23 @@
   const rand = (a, b) => a + Math.random() * (b - a);
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   const TAU = Math.PI * 2;
+
+  let pokemonSprite = null;
+  const spritePromise = spriteSource
+    ? loadSpriteCutout(spriteSource)
+      .then((sprite) => { pokemonSprite = sprite; })
+      .catch(() => { pokemonSprite = null; })
+    : Promise.resolve();
+  const pokegoldVm = isPokegold ? new PokegoldAnimationVM(effect) : null;
+  const pokegoldRenderer = isPokegold ? new PokegoldAnimationRenderer() : null;
+  let pokegoldReady = !isPokegold;
+  if (isPokegold) {
+    Promise.all([pokegoldRenderer.load(), spritePromise]).then(() => {
+      pokegoldReady = true;
+      document.documentElement.dataset.pokegoldReady = 'true';
+    });
+    window.__pokegoldAnimation = { effect, vm: pokegoldVm, renderer: pokegoldRenderer };
+  }
 
   const COL = {
     leaf: ['#3a9e3a', '#57b84f', '#2e7d32', '#7cc576'],
@@ -83,8 +109,7 @@
     return c;
   }
   if (effect === 'evolve') {
-    const q = new URLSearchParams(location.search);
-    const f = q.get('from'), t = q.get('to');
+    const f = query.get('from'), t = query.get('to');
     if (f) { fromImg = new Image(); fromImg.onload = () => { try { fromSil = makeSilhouette(fromImg); } catch { /* ignore */ } }; fromImg.src = f; }
     if (t) { toImg = new Image(); toImg.onload = () => { try { toSil = makeSilhouette(toImg); } catch { /* ignore */ } }; toImg.src = t; }
   }
@@ -213,6 +238,17 @@
     ctx.restore();
   }
 
+  function pxRect(x, y, w, h, c, a) {
+    ctx.globalAlpha = a == null ? ctx.globalAlpha : a;
+    ctx.fillStyle = c;
+    ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+  }
+
+  function drawChargeCross(cx, cy, r, c, a) {
+    pxRect(cx - r, cy - 2, r * 2, 4, c, a);
+    pxRect(cx - 2, cy - r, 4, r * 2, c, a);
+  }
+
   function drawBolts(alpha) {
     if (nowT - lastBolt > 0.11 && elapsed < DURATION - FADE_OUT) {
       const big = effect === 'electric_bolts';
@@ -222,9 +258,7 @@
       lastBolt = nowT;
     }
     if (effect === 'electric_bolts' && nowT < flashUntil) {
-      ctx.globalAlpha = alpha * 0.28;
-      ctx.fillStyle = '#fff27a';
-      ctx.fillRect(0, 0, W, H);
+      drawChargeCross(W / 2, H / 2, Math.min(W, H) * 0.18, '#fff27a', alpha * 0.28);
     }
     bolts = bolts.filter((b) => nowT - b.born < b.life);
     const strokePath = (pts, w) => {
@@ -253,7 +287,7 @@
     ctx.shadowBlur = 0;
   }
 
-  let nowT = 0, elapsed = 0, startTs = null;
+  let nowT = 0, elapsed = 0, startTs = null, alpha = 1;
 
   const isSkill = !['hatch', 'evolve'].includes(effect);
   // juice: 임팩트 순간 화면 흔들림 세기(px)
@@ -265,14 +299,48 @@
     return Math.max(0, 1 - nowT / 0.8) * 3.2 * strong; // 시작 직후 강하게, 빠르게 감쇠
   }
 
+  function continueOrFinish() {
+    if (elapsed < DURATION) {
+      requestAnimationFrame(frame);
+    } else if (isPreview) {
+      startTs = null;
+      requestAnimationFrame(frame);
+    } else {
+      ctx.clearRect(0, 0, W, H);
+    }
+  }
+
   function frame(ts) {
+    if (isPokegold && !pokegoldReady) {
+      ctx.clearRect(0, 0, W, H);
+      requestAnimationFrame(frame);
+      return;
+    }
     if (startTs === null) startTs = ts;
     elapsed = ts - startTs;
     nowT = elapsed / 1000;
     const dt = 1 / 60;
 
     ctx.clearRect(0, 0, W, H);
-    let alpha = 1;
+    if (isPokegold) {
+      const targetFrame = frozenFrame ?? Math.floor(elapsed * 60 / 1000);
+      const state = pokegoldVm.seek(targetFrame);
+      pokegoldRenderer.render(ctx, state, { pokemonSprite, width: W, height: H });
+      document.documentElement.dataset.pokegoldFrame = String(state.frame);
+      document.documentElement.dataset.pokegoldDone = String(state.done);
+      if (frozenFrame != null) return;
+      if (state.done) {
+        if (isPreview && elapsed >= (state.frame + 30) * 1000 / 60) {
+          pokegoldVm.reset();
+          startTs = null;
+        } else if (!isPreview) {
+          ctx.clearRect(0, 0, W, H);
+        }
+      }
+      if (isPreview || !state.done) requestAnimationFrame(frame);
+      return;
+    }
+    alpha = 1;
     if (elapsed < FADE_IN) alpha = elapsed / FADE_IN;
     else if (elapsed > DURATION - FADE_OUT) alpha = Math.max(0, (DURATION - elapsed) / FADE_OUT);
     ctx.globalAlpha = alpha;
@@ -282,13 +350,7 @@
     ctx.save();
     if (shk > 0.15) ctx.translate((Math.random() * 2 - 1) * shk, (Math.random() * 2 - 1) * shk);
 
-    // 시작 임팩트 플래시(기술 계열): 발동 순간 타입 색으로 화면을 짧게 번쩍
-    if (isSkill && elapsed < 130) {
-      ctx.globalAlpha = alpha * (1 - elapsed / 130) * 0.55;
-      ctx.fillStyle = colors[0];
-      ctx.fillRect(0, 0, W, H);
-      ctx.globalAlpha = alpha;
-    }
+    // 기술 계열은 배경을 칠하지 않고 이펙트 요소만 그린다.
 
     if (effect.endsWith('_beam')) {
       // 빔: 왼쪽에서 충전 → 화면을 가로지르는 굵은 에너지 광선(타입 색). 오리지널.
@@ -365,11 +427,6 @@
         drawLeaf(x, y, p.rot, p.size, p.c);
       }
     } else if (effect === 'fire') {
-      // 바닥 열기 글로우
-      const gg = ctx.createRadialGradient(W / 2, H, 0, W / 2, H, H * 0.9);
-      gg.addColorStop(0, `rgba(240,140,40,${alpha * 0.4})`);
-      gg.addColorStop(1, 'rgba(240,140,40,0)');
-      ctx.globalAlpha = 1; ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H);
       // 화면 폭을 가득 메우는 부드러운 불꽃 띠(여러 기둥이 이글이글)
       const n = Math.max(9, Math.round(W / 90));
       for (let k = 0; k < n; k++) {
@@ -379,10 +436,6 @@
     } else if (effect === 'fire_breath') {
       // 하단 중앙에서 위로 활활 타오르는 큰 부드러운 불기둥 + 좌우 보조 불꽃. 오리지널.
       const ox = W / 2, oy = H + 6;
-      const gg = ctx.createRadialGradient(ox, oy, 0, ox, oy, H);
-      gg.addColorStop(0, `rgba(240,140,40,${alpha * 0.45})`);
-      gg.addColorStop(1, 'rgba(240,140,40,0)');
-      ctx.globalAlpha = 1; ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H);
       const scale = W / 560;
       for (const dx of [-140, 140]) flameColumn(alpha * 0.85, ox + dx * scale, oy, H * 0.55, 70 * scale, nowT, dx);
       for (const dx of [-70, 70]) flameColumn(alpha * 0.9, ox + dx * scale, oy, H * 0.75, 90 * scale, nowT, dx * 3);
@@ -662,8 +715,7 @@
     }
 
     ctx.restore(); // shake 복원
-    if (elapsed < DURATION) requestAnimationFrame(frame);
-    else ctx.clearRect(0, 0, W, H);
+    continueOrFinish();
   }
   requestAnimationFrame(frame);
 })();

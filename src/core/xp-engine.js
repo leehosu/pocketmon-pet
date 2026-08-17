@@ -62,3 +62,24 @@ export function applyEvents(state, events, opts) {
     },
   };
 }
+
+// AI-GENERATED: 야생전 보상은 에이전트 활동 일일 상한과 분리해 총 XP에 직접 반영한다.
+export function applyBattleExperience(state, amount) {
+  const gain = Math.max(0, Math.floor(Number(amount) || 0));
+  const startLevel = state.level || levelForXp(state.xp || 0);
+  const startStage = state.stage || 0;
+  const next = { ...state, xp: (state.xp || 0) + gain };
+  next.level = levelForXp(next.xp);
+  const maxStage = stageForLevel(getSpeciesByKey(next.species), next.level);
+  next.stage = Math.min(next.stage || 0, maxStage);
+  return {
+    state: next,
+    changes: {
+      leveledUp: next.level > startLevel,
+      evolved: next.stage > startStage,
+      xpGained: gain,
+      reactions: gain > 0 ? 1 : 0,
+      battleReward: true,
+    },
+  };
+}

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{color-scheme:dark}
+    *{box-sizing:border-box}
+    html,body{width:100%;height:100%;margin:0;background:transparent;overflow:hidden}
+    body{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#f8f9fb;user-select:none}
+    #battle{position:relative;width:100%;height:100%}
+    #close{position:absolute;z-index:5;top:18px;right:20px;width:34px;height:34px;border:1px solid rgba(255,255,255,.34);border-radius:50%;background:rgba(8,10,14,.72);color:#fff;font:24px/30px sans-serif;cursor:pointer}
+    #music{position:absolute;z-index:5;top:18px;right:62px;width:34px;height:34px;border:1px solid rgba(255,255,255,.34);border-radius:50%;background:rgba(8,10,14,.72);color:#fff;font:700 18px/30px sans-serif;cursor:pointer}
+    #music[aria-pressed="false"]{color:#838b94;text-decoration:line-through}
+    #message{position:absolute;z-index:4;top:7%;left:50%;transform:translateX(-50%);min-width:260px;max-width:min(80vw,620px);padding:8px 14px;background:rgba(8,10,14,.8);border:1px solid rgba(255,255,255,.3);border-radius:4px;text-align:center;font-size:13px;font-weight:700;text-shadow:0 1px 1px #000}
+    .combatant{position:absolute;width:190px;height:230px;pointer-events:none}
+    #enemy{left:68%;top:22%;transform:translate(-50%,-50%)}
+    #player{left:50%;top:59%;transform:translate(-50%,-50%)}
+    .sprite{display:block;width:180px;height:180px;margin:0 auto;image-rendering:pixelated;filter:drop-shadow(0 7px 3px rgba(0,0,0,.38))}
+    #player .sprite{width:190px;height:190px}
+    .info{height:42px;padding:5px 7px;background:rgba(8,10,14,.82);border:1px solid rgba(255,255,255,.3);border-radius:4px;text-shadow:0 1px 1px #000}
+    .line{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;font-weight:700;white-space:nowrap}
+    .hp{height:6px;margin-top:5px;background:rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.28)}
+    .hp>span{display:block;height:100%;width:100%;background:#4ed36b;transition:width .35s ease,background .2s}
+    #moves{position:absolute;z-index:4;left:50%;bottom:6%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(2,minmax(132px,190px));gap:8px;width:min(90vw,390px)}
+    .move{min-height:42px;padding:8px 10px;border:1px solid rgba(255,255,255,.42);border-radius:4px;background:rgba(10,13,18,.86);color:#fff;font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;transition:background .12s,transform .12s}
+    .move:hover:not(:disabled){background:rgba(46,55,68,.95)}
+    .move:active:not(:disabled){transform:translateY(1px)}
+    .move:disabled{opacity:.45;cursor:default}
+    #moves.hidden{visibility:hidden}
+    #result{position:absolute;z-index:7;left:50%;top:50%;transform:translate(-50%,-50%);width:min(86vw,340px);padding:22px 20px;background:rgba(255,249,211,.97);border:2px solid #283126;border-radius:4px;color:#172018;text-align:center;box-shadow:0 6px 0 rgba(0,0,0,.3)}
+    #result[hidden]{display:none}
+    #result-title{font-size:22px;font-weight:900}
+    #result-xp{margin-top:8px;color:#9b6200;font-size:28px;font-weight:900}
+    #result-detail{margin-top:8px;font-size:12px;font-weight:800}
+    .damage{position:absolute;z-index:6;color:#fff;font-size:20px;font-weight:900;text-shadow:0 2px 2px #000;animation:float .9s ease-out forwards;pointer-events:none}
+    .damage.good{color:#ffe052}.damage.heal{color:#78ee8d}
+    @keyframes float{0%{opacity:0;transform:translate(-50%,8px) scale(.8)}25%{opacity:1;transform:translate(-50%,-4px) scale(1.08)}100%{opacity:0;transform:translate(-50%,-42px) scale(1)}}
+    @media(max-width:700px){#enemy{left:72%;top:24%}#player{left:43%;top:60%}.combatant{width:150px}.sprite,#player .sprite{width:150px;height:150px}.combatant{height:200px}#moves{bottom:4%}}
+    @media(prefers-reduced-motion:reduce){.damage{animation:none}.hp>span{transition:none}}
+  </style>
+</head>
+<body>
+  <main id="battle">
+    <button id="music" type="button" title="배틀 음악 끄기" aria-label="배틀 음악 끄기" aria-pressed="true">♪</button>
+    <button id="close" type="button" title="전투에서 나가기" aria-label="전투에서 나가기">×</button>
+    <div id="message">전투 준비</div>
+    <section id="enemy" class="combatant">
+      <canvas class="sprite" width="180" height="180"></canvas>
+      <div class="info"><div class="line"><span class="name">야생 포켓몬</span><span class="level">Lv.1</span></div><div class="hp"><span></span></div></div>
+    </section>
+    <section id="player" class="combatant">
+      <canvas class="sprite" width="190" height="190"></canvas>
+      <div class="info"><div class="line"><span class="name">포켓몬</span><span class="level">Lv.1</span></div><div class="hp"><span></span></div></div>
+    </section>
+    <div id="moves"></div>
+    <section id="result" aria-live="assertive" hidden>
+      <div id="result-title"></div>
+      <div id="result-xp"></div>
+      <div id="result-detail"></div>
+    </section>
+  </main>
+  <script type="module" src="./battle-window.js"></script>
+</body>
+</html>

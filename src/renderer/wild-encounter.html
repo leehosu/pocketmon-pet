@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    *{box-sizing:border-box}
+    html,body{width:100%;height:100%;margin:0;background:transparent;overflow:hidden}
+    body{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#fff;user-select:none}
+    #wild{position:relative;width:100%;height:100%;border:0;padding:0;background:transparent;cursor:pointer}
+    #sprite{position:absolute;left:42px;top:18px;width:96px;height:96px;image-rendering:pixelated;filter:drop-shadow(0 4px 2px rgba(0,0,0,.34));animation:appear .55s steps(5,end),hover 1.2s ease-in-out .55s infinite}
+    #label{position:absolute;left:10px;right:10px;bottom:20px;min-height:30px;padding:6px 8px;background:rgba(255,249,211,.96);border:2px solid #283126;border-radius:4px;color:#172018;font-size:11px;font-weight:800;text-align:center;box-shadow:0 2px 0 rgba(0,0,0,.28)}
+    #life{position:absolute;left:18px;right:18px;bottom:10px;height:4px;background:rgba(23,32,24,.42);border:1px solid rgba(23,32,24,.7)}
+    #life-fill{display:block;width:100%;height:100%;background:#e2b928;transform-origin:left center}
+    @keyframes appear{0%{opacity:0;transform:scale(.35) translateY(18px)}100%{opacity:1;transform:scale(1) translateY(0)}}
+    @keyframes hover{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+    @media(prefers-reduced-motion:reduce){#sprite{animation:none}}
+  </style>
+</head>
+<body>
+  <button id="wild" type="button" title="야생 포켓몬과 전투">
+    <canvas id="sprite" width="128" height="128"></canvas>
+    <span id="label">야생 포켓몬</span>
+    <span id="life"><span id="life-fill"></span></span>
+  </button>
+  <script type="module" src="./wild-encounter.js"></script>
+</body>
+</html>

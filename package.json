@@ -6,7 +6,9 @@
   "main": "src/main/index.js",
   "scripts": {
     "start": "electron .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "generate:pokegold": "node scripts/generate-pokegold-anim-data.mjs",
+    "capture:pokegold": "electron scripts/capture-pokegold-effects.mjs"
   },
   "devDependencies": {
     "electron": "41.7.1",
