@@ -1,5 +1,7 @@
 # pocketmon-pet
 
+![pocketmon-pet — Claude Code / Codex로 코딩하며 키우는 8비트 포켓몬 데스크톱 펫](docs/assets/readme/overview.png)
+
 Claude Code / Codex로 코딩하는 동안 화면 위를 떠다니는 8비트 포켓몬 데스크톱 펫입니다.
 당신이 도구를 쓰고 세션을 진행할수록 XP를 얻어 레벨업하고, 일정 레벨에 도달하면
 진화합니다. Electron 기반 투명·항상-위(always-on-top) 창으로 동작하며, 상태는
