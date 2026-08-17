@@ -68,29 +68,6 @@ XP는 두 경로로 들어옵니다 (`src/core/xp-engine.js`):
 
 최초 실행 시 이 4계열 중 하나가 랜덤으로 배정되며, 이후 고정됩니다.
 
-## 커스텀 스프라이트 (원하는 모습으로 꾸미기)
-
-`~/.pocketmon/sprites/` 폴더에 PNG를 넣으면 내장 도트 그래픽 대신 그 이미지가 표시됩니다.
-
-폴더가 비어 있거나 매칭되는 파일이 없으면 항상 내장 도트로 폴백합니다.
-
-**파일명 규칙** (`src/core/sprite-files.js`):
-
-```
-<species>_<stage>.png              # 해당 종/단계의 모든 애니메이션에 공통 적용
-<species>_<stage>_<anim>.png       # 특정 애니메이션에만 적용 (공용 파일보다 우선)
-```
-
-- `species`: `grass` | `fire` | `water` | `electric`
-- `stage`: `0` | `1` | `2` (1단계=0, 2단계=1, 3단계=2)
-- `anim` (선택): `idle` | `walk` | `run` | `skill`
-
-예: 전기 계열 2단계(피카츄)의 기본 모습을 바꾸려면 `electric_1.png`, 달리기 모션만 별도로 주고 싶으면 `electric_1_run.png`을 함께 넣으면 됩니다.
-
-파일을 넣거나 바꾸면 앱이 다음 tick(최대 4초)에 자동으로 폴더 변경을 감지해 반영합니다.
-
-재시작할 필요는 없습니다.
-
 ## 상호작용
 
 - **드래그**: 캔버스를 눌러서 끌면 창이 이동합니다(마우스다운~업 사이 이동량이 임계값 이상일 때 드래그로 인식).
@@ -110,7 +87,6 @@ XP는 두 경로로 들어옵니다 (`src/core/xp-engine.js`):
 - [ ] `npm start` 실행 → 투명 창에 포켓몬 1마리가 표시되고, 메뉴바에 트레이 아이콘이 뜬다.
 - [ ] hook을 등록했거나(위 참고), 직접 이벤트를 하나 흘려본다: `echo '{"hook_event_name":"PostToolUse","session_id":"manual"}' | node hook/pocketmon-hook.js` → 다음 tick(최대 4초)에 펫이 반응하고 XP가 오른다.
 - [ ] 앱을 종료 후 재실행 → 같은 포켓몬·레벨이 유지된다 (`~/.pocketmon/save.json` 존재 확인).
-- [ ] `~/.pocketmon/sprites/`에 규칙에 맞는 PNG(예: `grass_0.png`)를 넣는다 → 다음 tick에 내장 도트 대신 그 이미지로 바뀐다.
 
 ## 개발
 
@@ -120,9 +96,8 @@ npx vitest run   # 또는 npm test
 
 ## 포켓몬 스프라이트 · 울음소리 출처
 
-- 포켓몬 스프라이트는 앱에 **번들하지 않고**, 공개 [PokéAPI/sprites](https://github.com/PokeAPI/sprites)에서 **런타임에 내려받아** `~/.pocketmon/sprites/`에 로컬 캐시합니다. (트레이 메뉴 "포켓몬 스프라이트 받기" 또는 실행 시 현재 종의 진화 라인 자동 다운로드. 오프라인·실패 시 내장 오리지널 도트로 폴백.)
+- 포켓몬 스프라이트는 앱에 **번들하지 않고**, 공개 [PokéAPI/sprites](https://github.com/PokeAPI/sprites)에서 **런타임에 내려받아** `~/.pocketmon/dex/`에 로컬 캐시합니다. (트레이 메뉴 "포켓몬 스프라이트 받기" 또는 실행 시 현재 종의 진화 라인 자동 다운로드. 오프라인·실패 시 내장 오리지널 도트로 폴백.)
 - 울음소리도 동일하게 공개 [PokéAPI/cries](https://github.com/PokeAPI/cries)에서 런타임에 받아 `~/.pocketmon/cries/`에 캐시하고, 펫을 클릭하면 재생합니다(앱 번들 미포함).
-- 직접 넣은 `~/.pocketmon/sprites/*.png`가 있으면 그 이미지가 우선합니다.
 
 ## 저작권 고지
 
