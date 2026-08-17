@@ -1,0 +1,239 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  :root{
+    --bg:#0b0c16; --bg2:#0e0f1a; --panel:#12142a; --panel2:#1a1d38;
+    --border:#2c3050; --gold:#f8c838; --ink:#e8eaff; --dim:#9aa0c8; --green:#3a9e3a;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:#05060c}
+  #stage{
+    width:1200px;height:600px;position:relative;overflow:hidden;
+    font-family:"SFMono-Regular",Menlo,Consolas,monospace;
+    color:var(--ink);
+    background:
+      radial-gradient(120% 90% at 18% 0%, #1a1e3d 0%, rgba(26,30,61,0) 55%),
+      radial-gradient(90% 80% at 100% 100%, #241a33 0%, rgba(36,26,51,0) 50%),
+      linear-gradient(160deg,#0e0f1a 0%,#0b0c16 60%,#080911 100%);
+  }
+  /* dotted pixel grid texture */
+  #stage::before{
+    content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+    background-image:radial-gradient(rgba(120,130,190,.10) 1px, transparent 1px);
+    background-size:16px 16px;
+  }
+  /* soft scanlines for CRT feel */
+  #stage::after{
+    content:"";position:absolute;inset:0;pointer-events:none;opacity:.35;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,.16) 0 2px, transparent 2px 4px);
+    mix-blend-mode:multiply;
+  }
+  .pad{position:absolute;inset:0;padding:44px 52px}
+
+  /* ---- HERO ---- */
+  .hero{display:flex;justify-content:space-between;align-items:flex-start}
+  .title{font-size:52px;font-weight:800;letter-spacing:-1px;line-height:1;
+    color:#fff;text-shadow:0 2px 0 rgba(0,0,0,.5)}
+  .title .dot{color:var(--gold)}
+  .tag{margin-top:16px;font-size:18px;color:var(--dim);line-height:1.5;max-width:560px}
+  .tag b{color:var(--ink);font-weight:600}
+  .badges{margin-top:20px;display:flex;gap:9px}
+  .chip{font-size:12.5px;padding:6px 12px;border:1px solid var(--border);
+    border-radius:999px;color:var(--dim);background:rgba(20,23,45,.6)}
+  .chip.g{color:var(--gold);border-color:rgba(248,200,56,.5);background:rgba(248,200,56,.08)}
+
+  /* floating pet window mock over an editor */
+  .mock{position:relative;width:430px;height:250px;flex:none}
+  .editor{position:absolute;right:0;top:34px;width:372px;height:206px;
+    background:linear-gradient(180deg,#151832,#101226);
+    border:1px solid var(--border);border-radius:12px;overflow:hidden;
+    box-shadow:0 24px 60px -18px rgba(0,0,0,.75)}
+  .tb{height:30px;display:flex;align-items:center;gap:7px;padding:0 12px;
+    background:#0f1124;border-bottom:1px solid var(--border)}
+  .tl{width:11px;height:11px;border-radius:50%}
+  .code{padding:14px 16px 14px 22px;font-size:12.5px;line-height:1.85;color:#6b73a8}
+  .code .k{color:#c58bff}.code .f{color:#7ac6ff}.code .s{color:#8fd88f}
+  .code .c{color:#4a5080}.code .n{color:var(--gold)}
+  /* floating pet widget over the editor (always-on-top look) */
+  .petwin{position:absolute;left:0;top:0;width:150px;
+    display:flex;flex-direction:column;align-items:center;gap:8px;
+    padding:14px 16px 12px;border:1px solid var(--border);border-radius:16px;
+    background:linear-gradient(180deg,#12142a,#0a0b17);
+    box-shadow:0 20px 44px -14px rgba(0,0,0,.8), 0 0 0 1px rgba(248,200,56,.07)}
+  .psprite{image-rendering:pixelated;display:block}
+  #hero-sprite{width:104px;height:104px;object-fit:contain;
+    filter:drop-shadow(0 3px 5px rgba(0,0,0,.5))}
+  .xpwrap{width:104px}
+  .xpbar{width:104px;height:7px;background:rgba(0,0,0,.55);
+    border:1px solid #0f0f0f;border-radius:2px;overflow:hidden}
+  .xpfill{height:100%;background:var(--gold);box-shadow:0 0 8px rgba(248,200,56,.7)}
+  .lvrow{display:flex;justify-content:space-between;align-items:baseline;width:104px;
+    font-size:11px;color:var(--dim)}
+  .lvrow .lv{color:var(--gold);font-weight:800;font-size:12px}
+  .evbadge{position:absolute;right:-9px;top:-9px;width:24px;height:24px;
+    background:var(--gold);color:#1a1400;border:2px solid #1a1400;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;
+    box-shadow:0 0 12px var(--gold);z-index:2}
+
+  /* ---- LOOP ---- */
+  .loop{position:absolute;left:52px;right:52px;top:300px;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:16px 24px;border:1px solid var(--border);border-radius:14px;
+    background:linear-gradient(180deg,rgba(18,20,42,.7),rgba(11,12,22,.7))}
+  .step{display:flex;flex-direction:column;align-items:center;gap:8px;width:150px}
+  .stepic{width:52px;height:52px;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--border);border-radius:12px;background:#0f1126}
+  .stepic canvas{image-rendering:pixelated}
+  .stept{font-size:13.5px;font-weight:700;color:var(--ink)}
+  .steps{font-size:11px;color:var(--dim);text-align:center;line-height:1.4}
+  .arrow{color:var(--gold);font-size:22px;opacity:.8;margin-bottom:20px}
+
+  /* ---- ROSTER ---- */
+  .roster{position:absolute;left:52px;right:52px;top:450px;
+    display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .fam{border:1px solid var(--border);border-radius:12px;padding:12px 12px 11px;
+    background:linear-gradient(180deg,rgba(18,20,42,.55),rgba(11,12,22,.55))}
+  .famhd{display:flex;align-items:center;gap:7px;margin-bottom:9px}
+  .famdot{width:9px;height:9px;border-radius:50%}
+  .famname{font-size:12.5px;font-weight:700;color:var(--ink)}
+  .famtype{font-size:10.5px;color:var(--dim);margin-left:auto}
+  .line{display:flex;align-items:center;justify-content:space-between}
+  .mon{display:flex;flex-direction:column;align-items:center;gap:4px;width:56px}
+  .mon img{width:46px;height:46px;object-fit:contain;image-rendering:pixelated}
+  .monlv{font-size:9px;color:var(--dim)}
+  .monlv.base{color:var(--gold)}
+  .sep{color:var(--border);font-size:13px}
+  .foot{position:absolute;left:52px;bottom:14px;font-size:11px;color:#5a6096}
+  .foot b{color:var(--dim)}
+</style>
+
+<div id="stage">
+  <div class="pad">
+    <div class="hero">
+      <div>
+        <div class="title">pocketmon<span class="dot">·</span>pet</div>
+        <div class="tag"><b>Claude Code / Codex</b>로 코딩하는 동안 화면 위를 떠다니는<br>
+          8비트 포켓몬 데스크톱 펫. 도구를 쓰고 토큰을 태울수록 <b>XP</b>가 쌓여 자랍니다.</div>
+        <div class="badges">
+          <span class="chip g">◆ always-on-top</span>
+          <span class="chip">Electron</span>
+          <span class="chip">96×96 transparent</span>
+          <span class="chip">macOS tray</span>
+        </div>
+      </div>
+      <div class="mock">
+        <div class="editor">
+          <div class="tb"><span class="tl" style="background:#ff5f57"></span>
+            <span class="tl" style="background:#febc2e"></span>
+            <span class="tl" style="background:#28c840"></span></div>
+          <div class="code">
+            <span class="c">// 세션이 돌아갈수록 펫이 자란다</span><br>
+            <span class="k">const</span> xp = tokens / <span class="n">1000</span>;<br>
+            <span class="k">function</span> <span class="f">levelUp</span>(lv){<br>
+            &nbsp;&nbsp;<span class="k">return</span> <span class="f">floor</span>(<span class="n">100</span> * lv ** <span class="n">1.5</span>);<br>
+            }
+          </div>
+        </div>
+        <div class="petwin">
+          <div class="evbadge">!</div>
+          <img id="hero-sprite" class="psprite" alt="">
+          <div class="xpwrap">
+            <div class="lvrow"><span class="lv">Lv.14</span><span>피카츄</span></div>
+            <div class="xpbar"><div class="xpfill" style="width:72%"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="loop">
+      <div class="step"><div class="stepic"><canvas data-ic="key" width="40" height="40"></canvas></div>
+        <div class="stept">코딩</div><div class="steps">도구 사용 · 토큰 소비</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="stepic"><canvas data-ic="xp" width="40" height="40"></canvas></div>
+        <div class="stept">XP 획득</div><div class="steps">도구 +2 · 1,000토큰 +1</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="stepic"><canvas data-ic="level" width="40" height="40"></canvas></div>
+        <div class="stept">레벨업</div><div class="steps">100 × lv<sup>1.5</sup></div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="stepic"><canvas data-ic="evolve" width="40" height="40"></canvas></div>
+        <div class="stept">진화</div><div class="steps">임계 레벨에서 <b style="color:#f8c838">!</b> 클릭</div></div>
+    </div>
+
+    <div class="roster" id="roster"></div>
+    <div class="foot"><b>상태 저장</b> ~/.pocketmon/save.json · 재설치해도 같은 포켓몬·레벨 유지 &nbsp;·&nbsp; <b>커스텀 스프라이트</b> 지원</div>
+  </div>
+</div>
+
+<script>
+const DATA = /*__DATA__*/;
+const SP = /*__POKE__*/;                 // dexId -> data URI (real Gen-2 sprites, opaque bg)
+const DEX = {grass:[152,153,154],fire:[155,156,157],water:[158,159,160],electric:[172,25,26]};
+
+// Gen-2 sprites ship with an opaque (near-white) background. Flood-fill from the
+// borders to knock it out while preserving any white pixels inside the sprite body.
+function keyOut(src){return new Promise(res=>{
+  const img=new Image();
+  img.onload=()=>{
+    const w=img.width,h=img.height;
+    const c=document.createElement('canvas');c.width=w;c.height=h;
+    const x=c.getContext('2d');x.imageSmoothingEnabled=false;x.drawImage(img,0,0);
+    const d=x.getImageData(0,0,w,h),p=d.data;
+    const br=p[0],bg=p[1],bb=p[2],T=36;
+    const match=i=>Math.abs(p[i]-br)<T&&Math.abs(p[i+1]-bg)<T&&Math.abs(p[i+2]-bb)<T;
+    const seen=new Uint8Array(w*h),st=[];
+    for(let xx=0;xx<w;xx++){st.push(xx,xx+(h-1)*w);}
+    for(let yy=0;yy<h;yy++){st.push(yy*w,yy*w+w-1);}
+    while(st.length){const idx=st.pop();if(idx<0||idx>=w*h||seen[idx])continue;seen[idx]=1;
+      const i=idx*4;if(!match(i))continue;p[i+3]=0;
+      const cx=idx%w,cy=(idx-cx)/w;
+      if(cx+1<w)st.push(idx+1);if(cx>0)st.push(idx-1);
+      if(cy+1<h)st.push(idx+w);if(cy>0)st.push(idx-w);
+    }
+    x.putImageData(d,0,0);res(c.toDataURL());
+  };
+  img.src=src;
+});}
+
+const FC = {grass:'#3a9e3a',fire:'#e08a1e',water:'#1e6bd1',electric:'#f8c838'};
+const roster = document.getElementById('roster');
+
+(async()=>{
+  const ids=[152,153,154,155,156,157,158,159,160,172,25,26];
+  const K={};
+  await Promise.all(ids.map(async id=>{ K[id]=await keyOut(SP[id]); }));
+
+  document.getElementById('hero-sprite').src = K[25]; // Pikachu
+
+  DATA.roster.forEach(f=>{
+    const el=document.createElement('div'); el.className='fam';
+    const lvls=['1', f.evolveLevels[0], f.evolveLevels[1]];
+    const dex=DEX[f.key];
+    el.innerHTML=`<div class="famhd"><span class="famdot" style="background:${FC[f.key]}"></span>
+      <span class="famname">${f.type}</span><span class="famtype">${f.key}</span></div>
+      <div class="line">
+        ${[0,1,2].map(st=>`<div class="mon"><img src="${K[dex[st]]}" alt="">
+          <div class="monlv ${st===0?'base':''}">${st===0?'Lv.1':'Lv.'+lvls[st]}</div></div>`).join('<span class="sep">▸</span>')}
+      </div>`;
+    roster.appendChild(el);
+  });
+  window.__ready = true;
+})();
+
+// loop icons: reuse real sprites / simple pixel glyphs
+function pixIcon(cv, cells, color, s=6){
+  const ctx=cv.getContext('2d'); const off=(cv.width-8*s)/2;
+  ctx.fillStyle=color;
+  cells.forEach(([x,y])=>ctx.fillRect(off+x*s, off+y*s, s, s));
+}
+// key(코딩): keyboard-ish, xp: star/spark, level: up chevrons, evolve: sparkle
+const IC={
+  key:[[1,3],[2,3],[3,3],[4,3],[5,3],[6,3],[1,4],[6,4],[1,5],[2,5],[3,5],[4,5],[5,5],[6,5]],
+  xp:[[3,1],[4,1],[3,2],[4,2],[1,3],[2,3],[3,3],[4,3],[5,3],[6,3],[2,4],[5,4],[1,5],[6,5]],
+  level:[[3,4],[4,4],[2,3],[5,3],[1,2],[6,2],[3,6],[4,6],[2,5],[5,5],[1,4],[6,4]],
+  evolve:[[3,0],[3,1],[3,3],[3,4],[0,2],[1,2],[5,2],[6,2],[3,2],[5,5],[6,6],[1,6]],
+};
+const ICC={key:'#7ac6ff',xp:'#f8c838',level:'#3a9e3a',evolve:'#f8c838'};
+document.querySelectorAll('.stepic canvas').forEach(cv=>{
+  const k=cv.dataset.ic; pixIcon(cv, IC[k], ICC[k], 5);
+});
+</script>

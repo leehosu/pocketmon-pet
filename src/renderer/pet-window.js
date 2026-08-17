@@ -3,7 +3,7 @@ import { PALETTE } from '../core/sprites/palette.js';
 import { drawFrame } from './canvas-render.js';
 import { xpForLevel, XP_RULES } from '../core/xp-engine.js';
 import { getSpeciesByKey, canEvolve } from '../core/roster.js';
-import { customCandidates } from '../core/sprite-files.js';
+import { spriteKey } from '../core/sprite-files.js';
 import { gen2SkillsForStage } from '../core/gsc-moves.js';
 import { loadSpriteCutout } from './sprite-alpha.js';
 
@@ -23,7 +23,7 @@ export function nextFrameIndex({ tickCount, frameCount }) {
   return tickCount % frameCount;
 }
 
-// 정지 이미지(커스텀/PokéAPI 스프라이트)에 입힐 모션 변형(순수). anim별로 다른 움직임.
+// 정지 이미지(PokéAPI 다운로드 스프라이트)에 입힐 모션 변형(순수). anim별로 다른 움직임.
 // dx/dy=이동(px), rot=회전(rad), sx/sy=스케일.
 export function spriteMotion(anim, tick) {
   const t = tick;
@@ -114,11 +114,11 @@ export function statusDetail(state, species, xpFor, dailyCap) {
   };
 }
 
-// available(Set 또는 배열)에 존재하는 첫 customCandidates 키를 반환, 없으면 null.
-export function pickCustomKey(available, species, stage, anim) {
+// available(Set 또는 배열)에 다운로드 스프라이트 키(<species>_<stage>)가 있으면 반환, 없으면 null.
+export function pickSpriteKey(available, species, stage) {
   const has = available instanceof Set ? (k) => available.has(k) : (k) => available.includes(k);
-  for (const key of customCandidates(species, stage, anim)) if (has(key)) return key;
-  return null;
+  const key = spriteKey(species, stage);
+  return has(key) ? key : null;
 }
 
 // ============================================================
@@ -148,7 +148,7 @@ if (typeof window !== 'undefined') {
 
   let latest = null; // 마지막으로 수신한 { state, changes, activity, command }
 
-  // 커스텀 스프라이트: ~/.pocketmon/sprites/ 에서 로드된 사용자 PNG 캐시.
+  // 다운로드 스프라이트: ~/.pocketmon/dex/ 에서 로드된 PokéAPI PNG 캐시.
   // payload.customSprites는 최초 1회 + 변경 시에만 실려오므로(메인 프로세스가 gate),
   // 여기서는 받을 때마다 누적 교체한다 — 안 오면 이전 값을 그대로 유지.
   const customImages = new Map(); // key -> HTMLImageElement
@@ -204,7 +204,7 @@ if (typeof window !== 'undefined') {
     ({ moves: currentMoves, sig: currentMovesSig } = nextMovesCache(state, currentMoves, currentMovesSig, moves));
 
     if (customSprites) {
-      // 골드판 PNG의 흰 배경을 제거한 캔버스로 변환해 메인 펫에도 동일하게 적용한다.
+      // 변경분이 실린 tick에서 Gold PNG 외부 흰 배경을 제거해 다시 로드한다.
       for (const [key, dataUrl] of Object.entries(customSprites)) {
         loadSpriteCutout(dataUrl)
           .then((sprite) => { customImages.set(key, sprite); })
@@ -417,15 +417,15 @@ if (typeof window !== 'undefined') {
       const renderKey = hatched ? state.species : 'egg';
       const stage = hatched ? (state.stage || 0) : 0;
       if (renderKey) {
-        // 커스텀/PokéAPI 이미지는 부화 후에만 사용(알은 항상 코드 도트).
-        const customKey = hatched ? pickCustomKey(customKeys, renderKey, stage, currentAnim) : null;
+        // 다운로드된 PokéAPI 이미지는 부화 후에만 사용(알은 항상 코드 도트).
+        const customKey = hatched ? pickSpriteKey(customKeys, renderKey, stage) : null;
         const customImg = customKey ? customImages.get(customKey) : null;
         const customReady = customImg
           && (customImg.naturalWidth || customImg.width) > 0
           && (customImg.naturalHeight || customImg.height) > 0;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         if (customReady) {
-          // 정지 이미지(PokéAPI/커스텀)에 anim별 모션 변형(바운스·뒤뚱·팝)을 입혀 그린다.
+          // 정지 이미지(PokéAPI 다운로드 스프라이트)에 anim별 모션 변형(바운스·뒤뚱·팝)을 입혀 그린다.
           const m = spriteMotion(currentAnim, tickCount);
           const cw = canvas.width, ch = canvas.height;
           ctx.imageSmoothingEnabled = false;
