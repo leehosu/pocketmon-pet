@@ -188,9 +188,11 @@ function driftWindow(activity) {
   mainWindow.setBounds({ x: nextX, y: nextY, width: bounds.width, height: bounds.height });
 }
 
-// ---- 커스텀 스프라이트: ~/.pocketmon/sprites/ 의 사용자 PNG → data URL 맵 ----
+// ---- 다운로드 스프라이트: 앱 전용 캐시 폴더(~/.pocketmon/dex/)의 PNG → data URL 맵 ----
+// 사용자가 임의 PNG를 넣어 교체하는 커스텀 기능은 없다. 앱이 PokéAPI에서 받아
+// 이 폴더에 저장한 <species>_<stage>.png 만 로드한다.
 // 폴더 전체를 매 tick 재전송하면 대용량 IPC가 되므로, 파일목록+mtime+size로
-// 만든 시그니처가 바뀔 때만(=최초 1회 포함) 재로드해 payload에 싣는다.
+// 만든 시그니처가 바뀔 때만(=최초 1회 포함, 다운로드 완료 반영 포함) 재로드해 payload에 싣는다.
 let customSpritesSignature = null;
 
 // 기술 이펙트: 현재 디스플레이 전체를 덮는 투명·클릭통과 오버레이 창을 만들어
@@ -261,7 +263,7 @@ function downloadTo(url, dest, cb, redirects) {
 }
 
 // 현재 종의 진화 라인 스프라이트를 공개 PokéAPI에서 런타임 다운로드해
-// ~/.pocketmon/sprites/<key>_<stage>.png 로 캐시(앱에 번들하지 않음). 이미 있으면 건너뛴다.
+// ~/.pocketmon/dex/<key>_<stage>.png 로 캐시(앱에 번들하지 않음). 이미 있으면 건너뛴다.
 // 실패/오프라인은 조용히 무시 — 기존 코드 도트로 폴백. 다운로드 성공 시 다음 tick의
 // 스프라이트 폴더 서명 갱신이 자동으로 렌더러에 반영한다.
 function fetchSpeciesSprites(key) {
