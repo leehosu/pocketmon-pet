@@ -6,6 +6,7 @@ import {
   writeFileSync, mkdirSync, createWriteStream, renameSync, unlinkSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import https from 'node:https';
 
 import { dataDir, EVENTS_FILE } from '../core/paths.js';
@@ -14,7 +15,26 @@ import { getSpeciesByKey, canEvolve } from '../core/roster.js';
 import { parseSessionLines, parseCodexLines } from '../core/session-parser.js';
 import { tick, ensureStarter } from './orchestrator.js';
 import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
-import { dexLine, spriteUrl, cryUrl, pokemonUrl, typeUrl, moveUrl } from '../core/pokeapi.js';
+import {
+  dexLine, spriteUrl, cryUrl, pokemonUrl, moveUrl, moveValueForVersion,
+} from '../core/pokeapi.js';
+import { GEN2_EFFECTS, gen2SkillsForStage } from '../core/gsc-moves.js';
+import { applyBattleExperience } from '../core/xp-engine.js';
+import {
+  createBattleProfile,
+  ensureBattleProfile,
+  recordBattleLoss,
+  recordBattleVictory,
+  wildBattleExperience,
+} from '../core/gen2-profile.js';
+import { createGen2Battle, resolveGen2Turn } from '../core/gen2-battle.js';
+import {
+  canScheduleEncounter,
+  nextEncounterDelayMs,
+  wildAppearanceDurationMs,
+} from '../core/encounter-scheduler.js';
+import { chooseWildEncounter } from '../core/wild-catalog.js';
+import { prepareWildPokemon } from './wild-service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -25,6 +45,10 @@ const DETAIL_WIDTH = 210;
 const DETAIL_HEIGHT = 320;
 // 기술 이펙트 오버레이 자동 종료 시간.
 const EFFECT_DURATION_MS = 2800;
+const POKEGOLD_EFFECT_DURATION_MS = 4300;
+const RESULT_HOLD_MS = 3000;
+const WILD_WINDOW_WIDTH = 180;
+const WILD_WINDOW_HEIGHT = 190;
 const EFFECT_TYPES = [
   'leaf', 'leaf_swirl',
   'fire', 'fire_breath',
@@ -36,7 +60,9 @@ const EFFECT_TYPES = [
   // 개념 기반 오리지널 스타일(타입 색으로 tint) — 기술마다 달라 보이게
   'grass_beam', 'fire_beam', 'water_beam', 'electric_beam',
   'grass_impact', 'fire_impact', 'water_impact', 'electric_impact',
+  ...GEN2_EFFECTS,
 ];
+const SPECIES_KEYS = ['grass', 'fire', 'water', 'electric'];
 const DRIFT_STEP_BUSY = 6; // 프롬프트 처리중(달리기) — 크게 움직임
 const DRIFT_STEP_IDLE = 1; // 평상시 — 가끔 조금만 움직임
 const IDLE_MOVE_CHANCE = 0.15;
@@ -56,6 +82,8 @@ const MANUAL_MOVE_COOLDOWN_MS = 1500;
 
 let mainWindow = null;
 let effectWin = null;
+let wildWindow = null;
+let battleWindow = null;
 let tray = null;
 let intervalId = null;
 let driftDir = 1;
@@ -63,6 +91,13 @@ let state = null;
 let lastManualMoveAt = 0;
 let lastCrySig = null; // 렌더러에 마지막으로 보낸 울음소리(종_단계) 시그니처
 let lastMovesSig = null; // 렌더러에 마지막으로 보낸 기술목록(종) 시그니처
+let nextEncounterAt = 0;
+let currentEncounter = null;
+let currentBattle = null;
+let encounterPreparing = false;
+let encounterExpiryTimer = null;
+let battleTurnTimer = null;
+const pendingSpriteLines = new Set();
 
 // ---- readEvents(): hook이 append하는 서명된 events.jsonl을 증분 읽기 + 검증 ----
 // 서명(sig)이 없거나 위조된 이벤트는 조용히 버린다(치팅 방지) — 앱이 XP의 유일한 권위.
@@ -210,21 +245,23 @@ function playSkillEffect(effect, opts) {
 
   const win = new BrowserWindow({
     x: b.x, y: b.y, width: b.width, height: b.height,
-    transparent: true, frame: false, hasShadow: false,
+    transparent: true, backgroundColor: '#00000000', frame: false, hasShadow: false,
     resizable: false, movable: false, minimizable: false, maximizable: false,
     focusable: false, skipTaskbar: true, enableLargerThanScreen: true,
     webPreferences: { contextIsolation: true },
   });
   effectWin = win;
+  win.setBackgroundColor('#00000000');
   win.setIgnoreMouseEvents(true, { forward: true }); // 클릭이 데스크톱으로 통과
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(join(__dirname, '../renderer/effect-overlay.html'), { query: { effect, ...(opts || {}) } });
 
+  const duration = effect.startsWith('gsc_') ? POKEGOLD_EFFECT_DURATION_MS : EFFECT_DURATION_MS;
   setTimeout(() => {
     if (win && !win.isDestroyed()) win.close();
     if (effectWin === win) effectWin = null;
-  }, EFFECT_DURATION_MS);
+  }, duration);
 }
 
 function spritesDirPath() { return join(dataDir(), SPRITE_DIR); }
@@ -262,92 +299,184 @@ function downloadTo(url, dest, cb, redirects) {
   req.setTimeout(10000, () => req.destroy(new Error('timeout')));
 }
 
-// 현재 종의 진화 라인 스프라이트를 공개 PokéAPI에서 런타임 다운로드해
+// 현재 종의 진화 라인 골드판 스프라이트를 공개 PokéAPI에서 런타임 다운로드해
 // ~/.pocketmon/dex/<key>_<stage>.png 로 캐시(앱에 번들하지 않음). 이미 있으면 건너뛴다.
 // 실패/오프라인은 조용히 무시 — 기존 코드 도트로 폴백. 다운로드 성공 시 다음 tick의
 // 스프라이트 폴더 서명 갱신이 자동으로 렌더러에 반영한다.
 function fetchSpeciesSprites(key) {
   const line = dexLine(key);
-  if (!line.length) return;
+  if (!line.length || pendingSpriteLines.has(key)) return;
   const dir = spritesDirPath();
   const cdir = criesDirPath();
   try { mkdirSync(dir, { recursive: true }); mkdirSync(cdir, { recursive: true }); } catch { return; }
+  const marker = join(dir, `.pokeapi-gold-${key}-v1`);
+  const refreshGoldSprites = !existsSync(marker);
+  let pending = 0;
+  let failed = false;
+  pendingSpriteLines.add(key);
+  const done = (error) => {
+    failed ||= Boolean(error);
+    pending -= 1;
+    if (pending > 0) return;
+    if (!failed) {
+      try { writeFileSync(marker, 'PokeAPI generation-ii/gold'); } catch { /* 다음 실행에 재시도 */ }
+    }
+    pendingSpriteLines.delete(key);
+  };
   line.forEach((dexId, stage) => {
     const png = join(dir, `${key}_${stage}.png`);
-    if (!existsSync(png)) downloadTo(spriteUrl(dexId), png, () => {});
+    if (refreshGoldSprites || !existsSync(png)) {
+      pending += 1;
+      downloadTo(spriteUrl(dexId), png, done);
+    }
     // 울음소리(.ogg)도 같은 방식으로 런타임 캐시.
     const ogg = join(cdir, `${key}_${stage}.ogg`);
     if (!existsSync(ogg)) downloadTo(cryUrl(dexId), ogg, () => {});
   });
+  if (pending === 0) pendingSpriteLines.delete(key);
 }
 
 function criesDirPath() { return join(dataDir(), 'cries'); }
 function movesDirPath() { return join(dataDir(), 'moves'); }
 
-// 종 키 → 그 타입의 오리지널 이펙트 변형(실제 기술 4개에 번갈아 매핑).
-// 원소별 이펙트 풀 — 그 풀의 모든 연출은 "그 원소로 읽혀야" 한다.
-// (불 기술에 레이저가 튀어나오는 불일치 방지: 불 풀엔 빔 없음, 전부 불꽃/폭발)
-const EFFECT_POOLS = {
-  grass: ['leaf', 'leaf_swirl', 'grass_impact'],
-  fire: ['fire_breath', 'fire', 'fire_impact'],       // 불기둥 / 불꽃띠 / 불꽃폭발 — 전부 불
-  water: ['water', 'water_bubbles', 'water_beam'],    // 물줄기 / 거품 / 물대포(파랑이라 물로 읽힘)
-  electric: ['electric', 'electric_bolts', 'electric_beam'],
-};
 const prettify = (slug) => slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
-// 기술마다 서로 다른 오리지널 이펙트를 배정(이름 해시 기반, 결정적). 게임 애니 복제 아님.
-// - 이름 뜻이 뚜렷하면 전용 연출(불대문자 → 大 불꽃)
-// - 그 외엔 그 원소 풀에서 이름 해시로 하나 선택 → 기술마다 달라 보이되 원소는 항상 일치
-function effectForMove(species, slug, koName) {
-  // 뜻이 뚜렷한 대표 기술은 전용 연출로 이펙트=기술을 일치시킨다.
-  if (species === 'fire') {
-    if (slug === 'fire-blast' || (koName && koName.includes('대문자'))) return 'fire_kanji';   // 불대문자 → 大
-    if (slug === 'flamethrower' || (koName && koName.includes('화염방사'))) return 'fire_breath'; // 화염방사 → 직선 화염 불기둥
-  }
-  let h = 0;
-  for (const ch of slug) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  const pool = EFFECT_POOLS[species] || ['leaf'];
-  return pool[h % pool.length];
+function gen2DisplayMoves(species, stage = 0) {
+  return gen2SkillsForStage(species, stage).map(({ slug, name, effect }) => ({
+    slug, name, effect, source: 'builtin',
+  }));
 }
 
-// 그 종이 배우는 "타입 일치" 기술 4개의 실제 이름을 공개 PokéAPI에서 런타임 조회해
-// ~/.pocketmon/moves/<종>.json 에 캐시(앱/레포에 무브셋 미포함). 이펙트는 오리지널 타입 연출.
-// 실패/오프라인이면 캐시 없음 → 렌더러가 내장 기본 기술명으로 폴백.
+function usesOnlyGen2Effects(moves) {
+  return Array.isArray(moves) && moves.length > 0 && moves.every((m) => GEN2_EFFECTS.has(m.effect));
+}
+
+function sameMoves(a, b) {
+  return Array.isArray(a) && Array.isArray(b) && a.length === b.length
+    && a.every((m, i) => m.slug === b[i].slug && m.name === b[i].name && m.effect === b[i].effect);
+}
+
+const GEN2_PHYSICAL_TYPES = new Set(['normal', 'fighting', 'flying', 'poison', 'ground', 'rock', 'bug', 'ghost', 'steel']);
+
+function goldSilverDamageClass(type, currentDamageClass) {
+  if (currentDamageClass === 'status') return 'status';
+  return GEN2_PHYSICAL_TYPES.has(type) ? 'physical' : 'special';
+}
+
+function hasGoldSilverMetadata(moves) {
+  return Array.isArray(moves) && moves.every((move) => (
+    move.source === 'pokeapi:gold-silver'
+    && move.meta
+    && move.meta.schema === 2
+    && move.meta.type
+    && move.meta.learnMethod
+  ));
+}
+
+// PokéAPI의 gold-silver 버전 그룹에서 습득 가능 여부와 기술 메타데이터를 확인해 캐시한다.
 async function fetchMoves(species, stage) {
+  let file = null;
+  let expected = [];
   try {
     const line = dexLine(species);
     if (!line.length || line[stage] == null) return;
-    const file = join(movesDirPath(), `${species}_${stage}.json`);
-    if (existsSync(file)) return;
-    const [pk, ty] = await Promise.all([
-      fetch(pokemonUrl(line[stage])).then((r) => r.json()),
-      fetch(typeUrl(species)).then((r) => r.json()),
-    ]);
-    const learnable = new Set((pk.moves || []).map((m) => m.move.name));
-    const all = (ty.moves || []).map((m) => m.name).filter((n) => learnable.has(n));
-    // 단계별로 목록의 서로 다른 구간에서 2개 선택 → 진화할 때마다 기술이 확실히 바뀌도록
-    // (간격을 2로 벌려 1·2·3단계가 겹치지 않게. 목록이 짧으면 끝쪽으로 clamp.)
-    const start = Math.max(0, Math.min(stage * 2, all.length - 2));
-    const typeMoves = all.slice(start, start + 2);
-    const out = [];
-    for (let i = 0; i < typeMoves.length; i++) {
-      let label = prettify(typeMoves[i]);
+    file = join(movesDirPath(), `${species}_${stage}.json`);
+    expected = gen2DisplayMoves(species, stage);
+    if (existsSync(file)) {
       try {
-        const mv = await fetch(moveUrl(typeMoves[i])).then((r) => r.json());
-        const ko = (mv.names || []).find((n) => n.language && n.language.name === 'ko');
-        if (ko && ko.name) label = ko.name;
-      } catch { /* 이름 로컬라이즈 실패 → 영문 프리티 */ }
-      out.push({ name: label, effect: effectForMove(species, typeMoves[i], label) });
+        const cached = JSON.parse(readFileSync(file, 'utf8'));
+        if (usesOnlyGen2Effects(cached) && sameMoves(cached, expected) && hasGoldSilverMetadata(cached)) return;
+      } catch { /* 오래되거나 손상된 캐시는 API 데이터로 갱신 */ }
     }
-    if (out.length) {
+    const pokemonResponse = await fetch(pokemonUrl(line[stage]));
+    if (!pokemonResponse.ok) throw new Error(`PokéAPI pokemon ${pokemonResponse.status}`);
+    const pk = await pokemonResponse.json();
+    const out = await Promise.all(expected.map(async (move) => {
+      const learned = (pk.moves || []).find((entry) => entry.move.name === move.slug);
+      const details = (learned?.version_group_details || [])
+        .filter((entry) => entry.version_group.name === 'gold-silver');
+      if (!details.length) throw new Error(`${move.slug} is not learnable in gold-silver`);
+      const moveResponse = await fetch(moveUrl(move.slug));
+      if (!moveResponse.ok) throw new Error(`PokéAPI move ${moveResponse.status}`);
+      const mv = await moveResponse.json();
+      const ko = (mv.names || []).find((entry) => entry.language?.name === 'ko');
+      const type = moveValueForVersion(mv, 'type')?.name || mv.type?.name || null;
+      const flavor = (mv.flavor_text_entries || []).find((entry) => (
+        entry.version_group?.name === 'gold-silver' && entry.language?.name === 'en'
+      ));
+      const effectEntry = (mv.effect_entries || []).find((entry) => entry.language?.name === 'en');
+      const machine = (mv.machines || []).find((entry) => entry.version_group?.name === 'gold-silver');
+      const learnMethods = details.map((entry) => ({
+        method: entry.move_learn_method.name,
+        level: entry.level_learned_at,
+      }));
+      return {
+        ...move,
+        name: ko?.name || move.name || prettify(move.slug),
+        source: 'pokeapi:gold-silver',
+        meta: {
+          schema: 2,
+          id: mv.id,
+          type,
+          damageClass: goldSilverDamageClass(type, mv.damage_class?.name),
+          currentDamageClass: mv.damage_class?.name || null,
+          power: moveValueForVersion(mv, 'power'),
+          accuracy: moveValueForVersion(mv, 'accuracy'),
+          pp: moveValueForVersion(mv, 'pp'),
+          priority: mv.priority,
+          target: mv.target?.name || null,
+          generation: mv.generation?.name || null,
+          learnMethod: learnMethods[0].method,
+          levelLearnedAt: learnMethods[0].level,
+          learnMethods,
+          machineUrl: machine?.machine?.url || null,
+          ailment: mv.meta?.ailment?.name || 'none',
+          category: mv.meta?.category?.name || null,
+          effectChance: moveValueForVersion(mv, 'effect_chance'),
+          ailmentChance: mv.meta?.ailment_chance ?? 0,
+          flinchChance: mv.meta?.flinch_chance ?? 0,
+          statChance: mv.meta?.stat_chance ?? 0,
+          criticalRate: mv.meta?.crit_rate ?? 0,
+          drain: mv.meta?.drain ?? 0,
+          healing: mv.meta?.healing ?? 0,
+          minHits: mv.meta?.min_hits ?? null,
+          maxHits: mv.meta?.max_hits ?? null,
+          minTurns: mv.meta?.min_turns ?? null,
+          maxTurns: mv.meta?.max_turns ?? null,
+          statChanges: (mv.stat_changes || []).map((entry) => ({
+            stat: entry.stat.name,
+            change: entry.change,
+          })),
+          goldSilverFlavorText: flavor?.flavor_text?.replace(/\s+/g, ' ').trim() || null,
+          shortEffect: effectEntry?.short_effect?.replace(/\$effect_chance/g, String(moveValueForVersion(mv, 'effect_chance') ?? '')) || null,
+        },
+      };
+    }));
+    if (out.length === expected.length) {
       mkdirSync(movesDirPath(), { recursive: true });
       writeFileSync(file, JSON.stringify(out));
+      lastMovesSig = null;
     }
-  } catch { /* 실패 → 폴백(내장 기술명) */ }
+  } catch {
+    if (file && expected.length) {
+      try {
+        mkdirSync(movesDirPath(), { recursive: true });
+        writeFileSync(file, JSON.stringify(expected));
+        lastMovesSig = null;
+      } catch { /* 렌더러의 내장 기술표로 폴백 */ }
+    }
+  }
 }
 
 // 진화 라인 전체(3단계) 기술을 미리 받아둔다 → 진화 순간 바로 교체 가능.
 function fetchMovesLine(species) { for (let s = 0; s < 3; s++) fetchMoves(species, s); }
+
+function fetchPokeApiRoster() {
+  for (const species of SPECIES_KEYS) {
+    fetchSpeciesSprites(species);
+    fetchMovesLine(species);
+  }
+}
 
 // 종/단계가 바뀌었고 그 단계 무브 캐시가 준비되면 payload에 moves를 전달(매 tick 방지).
 function attachMoves(payload) {
@@ -356,8 +485,23 @@ function attachMoves(payload) {
   if (sig === lastMovesSig) return;
   try {
     const file = join(movesDirPath(), `${state.species}_${state.stage || 0}.json`);
-    if (!existsSync(file)) return;
-    payload.moves = JSON.parse(readFileSync(file, 'utf8'));
+    if (!existsSync(file)) {
+      payload.moves = gen2DisplayMoves(state.species, state.stage || 0);
+      lastMovesSig = sig;
+      return;
+    }
+    let moves = JSON.parse(readFileSync(file, 'utf8'));
+    if (!usesOnlyGen2Effects(moves)) {
+      moves = gen2DisplayMoves(state.species, state.stage || 0);
+      writeFileSync(file, JSON.stringify(moves));
+    } else {
+      const expected = gen2DisplayMoves(state.species, state.stage || 0);
+      if (expected.length && !sameMoves(moves, expected)) {
+        moves = expected;
+        writeFileSync(file, JSON.stringify(moves));
+      }
+    }
+    payload.moves = moves;
     lastMovesSig = sig;
   } catch { /* ignore */ }
 }
@@ -422,6 +566,299 @@ function refreshCustomSpritesIfChanged() {
   return loadCustomSprites(dir);
 }
 
+// ---- AI-GENERATED: 야생 조우와 2세대 전투 창 수명주기 ----
+function scheduleNextEncounter(now = Date.now()) {
+  nextEncounterAt = state?.hatched ? now + nextEncounterDelayMs(Math.random) : 0;
+}
+
+function clearEncounterExpiry() {
+  if (encounterExpiryTimer) clearTimeout(encounterExpiryTimer);
+  encounterExpiryTimer = null;
+}
+
+function closeWildWindow() {
+  clearEncounterExpiry();
+  const win = wildWindow;
+  wildWindow = null;
+  if (win && !win.isDestroyed()) win.close();
+}
+
+function finishUnclaimedEncounter() {
+  closeWildWindow();
+  currentEncounter = null;
+  scheduleNextEncounter();
+}
+
+function sendWildState() {
+  if (!wildWindow || wildWindow.isDestroyed() || !currentEncounter) return;
+  wildWindow.webContents.send('wild-state', {
+    id: currentEncounter.id,
+    speciesId: currentEncounter.speciesId,
+    name: currentEncounter.name,
+    level: currentEncounter.level,
+    sprite: currentEncounter.sprite,
+    cry: currentEncounter.cry,
+    expiresAt: currentEncounter.expiresAt,
+  });
+}
+
+function createWildWindow(encounter) {
+  const display = mainWindow && !mainWindow.isDestroyed()
+    ? screen.getDisplayMatching(mainWindow.getBounds())
+    : screen.getPrimaryDisplay();
+  const area = display.workArea;
+  const xRange = Math.max(1, area.width - WILD_WINDOW_WIDTH);
+  const yRange = Math.max(1, area.height - WILD_WINDOW_HEIGHT);
+  const x = area.x + Math.floor(Math.random() * xRange);
+  const y = area.y + Math.floor(Math.random() * yRange);
+  const win = new BrowserWindow({
+    x, y, width: WILD_WINDOW_WIDTH, height: WILD_WINDOW_HEIGHT,
+    transparent: true, backgroundColor: '#00000000', frame: false, hasShadow: false,
+    resizable: false, movable: false, minimizable: false, maximizable: false,
+    skipTaskbar: true,
+    webPreferences: {
+      preload: join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  wildWindow = win;
+  win.setBackgroundColor('#00000000');
+  win.setAlwaysOnTop(true, 'floating');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.loadFile(join(__dirname, '../renderer/wild-encounter.html'));
+  win.webContents.once('did-finish-load', sendWildState);
+  win.on('closed', () => {
+    if (wildWindow !== win) return;
+    wildWindow = null;
+    clearEncounterExpiry();
+    if (currentEncounter && !currentBattle) {
+      currentEncounter = null;
+      scheduleNextEncounter();
+    }
+  });
+  encounterExpiryTimer = setTimeout(() => {
+    if (currentEncounter?.id === encounter.id && !currentBattle) finishUnclaimedEncounter();
+  }, Math.max(0, encounter.expiresAt - Date.now()));
+}
+
+async function prepareAndShowWildEncounter(force = false) {
+  if (encounterPreparing || currentEncounter || currentBattle || !state?.hatched) return;
+  const now = Date.now();
+  const cooldownUntil = state.battleProfile?.encounterCooldownUntil || 0;
+  if (!force && !canScheduleEncounter({ hatched: true, cooldownUntil }, now)) return;
+  encounterPreparing = true;
+  nextEncounterAt = 0;
+  try {
+    const selected = chooseWildEncounter(state.level || 1, Math.random);
+    if (!selected) throw new Error('No eligible Gold encounter');
+    const prepared = await prepareWildPokemon({ cacheDir: dataDir(), ...selected });
+    if (currentEncounter || currentBattle || !state?.hatched) return;
+    const duration = wildAppearanceDurationMs(Math.random);
+    currentEncounter = {
+      id: randomUUID(),
+      ...selected,
+      ...prepared,
+      expiresAt: Date.now() + duration,
+    };
+    createWildWindow(currentEncounter);
+  } catch {
+    scheduleNextEncounter();
+  } finally {
+    encounterPreparing = false;
+  }
+}
+
+function runEncounterScheduler(now = Date.now()) {
+  if (!state?.hatched || currentEncounter || currentBattle || encounterPreparing) return;
+  const cooldownUntil = state.battleProfile?.encounterCooldownUntil || 0;
+  if (!canScheduleEncounter({ hatched: true, cooldownUntil }, now)) {
+    nextEncounterAt = 0;
+    return;
+  }
+  if (!nextEncounterAt) scheduleNextEncounter(now);
+  if (now >= nextEncounterAt) prepareAndShowWildEncounter();
+}
+
+function battlePayload(events = []) {
+  if (!currentBattle) return null;
+  return {
+    battleId: currentBattle.id,
+    turn: currentBattle.battle.turn,
+    resolving: currentBattle.resolving,
+    reward: currentBattle.reward,
+    totalXp: state?.xp || 0,
+    level: state?.level || 1,
+    resultChanges: currentBattle.resultChanges,
+    battle: currentBattle.battle,
+    events,
+    playerMoves: currentBattle.playerMoves,
+    playerSprite: currentBattle.playerSprite,
+    enemySprite: currentBattle.encounter.sprite,
+    enemyCry: currentBattle.encounter.cry,
+  };
+}
+
+function sendBattleState(events = []) {
+  if (!battleWindow || battleWindow.isDestroyed()) return;
+  const payload = battlePayload(events);
+  if (payload) battleWindow.webContents.send('battle-state', payload);
+}
+
+function restorePetWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.showInactive();
+    broadcastState(currentBattle?.resultChanges || {});
+  }
+}
+
+function finishBattleSession() {
+  if (battleTurnTimer) clearTimeout(battleTurnTimer);
+  battleTurnTimer = null;
+  const win = battleWindow;
+  battleWindow = null;
+  restorePetWindow();
+  currentBattle = null;
+  if (win && !win.isDestroyed()) win.close();
+  nextEncounterAt = 0;
+}
+
+function createBattleWindow() {
+  const display = mainWindow && !mainWindow.isDestroyed()
+    ? screen.getDisplayMatching(mainWindow.getBounds())
+    : screen.getPrimaryDisplay();
+  const bounds = display.bounds;
+  const win = new BrowserWindow({
+    x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+    transparent: true, backgroundColor: '#00000000', frame: false, hasShadow: false,
+    resizable: false, movable: false, minimizable: false, maximizable: false,
+    skipTaskbar: true, enableLargerThanScreen: true,
+    webPreferences: {
+      preload: join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  battleWindow = win;
+  win.setBackgroundColor('#00000000');
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.loadFile(join(__dirname, '../renderer/battle-window.html'));
+  win.webContents.once('did-finish-load', () => sendBattleState());
+  win.on('closed', () => {
+    if (battleWindow !== win) return;
+    battleWindow = null;
+    if (battleTurnTimer) clearTimeout(battleTurnTimer);
+    battleTurnTimer = null;
+    restorePetWindow();
+    currentBattle = null;
+    nextEncounterAt = 0;
+  });
+}
+
+function startBattle(encounter) {
+  state = ensureBattleProfile(state, Math.random);
+  const line = dexLine(state.species);
+  const playerSpeciesId = line[state.stage || 0];
+  const roster = getSpeciesByKey(state.species);
+  const playerName = roster?.stages[state.stage || 0]?.name || '포켓몬';
+  const playerMoves = gen2SkillsForStage(state.species, state.stage || 0);
+  const enemyDvs = createBattleProfile(Math.random).dvs;
+  const battle = createGen2Battle({
+    player: {
+      speciesId: playerSpeciesId,
+      name: playerName,
+      level: state.level,
+      dvs: state.battleProfile.dvs,
+      statExp: state.battleProfile.statExp,
+      moves: playerMoves.map((move) => move.slug),
+    },
+    enemy: {
+      speciesId: encounter.speciesId,
+      name: encounter.name,
+      level: encounter.level,
+      dvs: enemyDvs,
+      statExp: { hp: 0, attack: 0, defense: 0, speed: 0, special: 0 },
+      moves: encounter.moveIds,
+    },
+  });
+  currentBattle = {
+    id: randomUUID(),
+    encounter,
+    battle,
+    playerMoves,
+    playerSprite: spriteDataUrl(state.species, state.stage || 0),
+    resolving: false,
+    outcomeCommitted: false,
+    reward: 0,
+    resultChanges: {},
+  };
+  currentEncounter = null;
+  closeWildWindow();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+  createBattleWindow();
+}
+
+function commitBattleOutcome() {
+  if (!currentBattle || currentBattle.outcomeCommitted || !currentBattle.battle.winner) return;
+  currentBattle.outcomeCommitted = true;
+  if (currentBattle.battle.winner === 'player') {
+    const reward = wildBattleExperience(currentBattle.encounter.speciesId, currentBattle.encounter.level);
+    state = {
+      ...state,
+      battleProfile: recordBattleVictory(state.battleProfile, currentBattle.encounter.speciesId),
+    };
+    const applied = applyBattleExperience(state, reward);
+    state = applied.state;
+    currentBattle.reward = reward;
+    currentBattle.resultChanges = { ...applied.changes, battleWon: true };
+  } else {
+    state = { ...state, battleProfile: recordBattleLoss(state.battleProfile, Date.now()) };
+    currentBattle.resultChanges = { battleLost: true };
+  }
+  saveState(dataDir(), state);
+}
+
+function playResolvedPlayerEffect(events) {
+  if (!currentBattle) return;
+  const moveEvent = events.find((event) => event.kind === 'move' && event.actor === 'player');
+  if (!moveEvent) return;
+  const chargeOnly = events.some((event) => event.kind === 'charge' && event.actor === 'player')
+    && !events.some((event) => event.kind === 'damage' && event.target === 'enemy');
+  if (chargeOnly) return;
+  const move = currentBattle.playerMoves.find((entry) => entry.slug === moveEvent.moveSlug);
+  if (!move) return;
+  const opts = currentBattle.playerSprite ? { sprite: currentBattle.playerSprite } : undefined;
+  playSkillEffect(move.effect, opts);
+}
+
+function resolveBattleMove(payload) {
+  if (!currentBattle || currentBattle.resolving || currentBattle.battle.winner) return;
+  if (payload?.battleId !== currentBattle.id || Number(payload?.turn) !== currentBattle.battle.turn) return;
+  if (!currentBattle.playerMoves.some((move) => move.slug === payload.moveSlug)) return;
+  currentBattle.resolving = true;
+  const result = resolveGen2Turn(currentBattle.battle, payload.moveSlug, Math.random);
+  currentBattle.battle = result.state;
+  commitBattleOutcome();
+  sendBattleState(result.events);
+  playResolvedPlayerEffect(result.events);
+  const selectedMove = currentBattle.playerMoves.find((move) => move.slug === payload.moveSlug);
+  const effectDelay = selectedMove?.effect?.startsWith('gsc_') ? POKEGOLD_EFFECT_DURATION_MS : EFFECT_DURATION_MS;
+  const resultDelay = Math.max(effectDelay, result.events.length * 300 + 120 + RESULT_HOLD_MS);
+  battleTurnTimer = setTimeout(() => {
+    battleTurnTimer = null;
+    if (!currentBattle) return;
+    if (currentBattle.battle.winner) {
+      finishBattleSession();
+      return;
+    }
+    currentBattle.resolving = false;
+    sendBattleState();
+  }, resultDelay);
+}
+
 function runTick() {
   const today = new Date().toISOString().slice(0, 10);
   const result = tick({ state, readEvents, readSessionEvents, today });
@@ -435,6 +872,7 @@ function runTick() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('state', result);
   }
+  runEncounterScheduler();
 }
 
 function createWindow() {
@@ -499,7 +937,7 @@ function createTray() {
   const menu = Menu.buildFromTemplate([
     { label: '상태 보기', click: () => sendMenuCommand('showStatus') },
     { label: '첫 만남 다시보기', click: () => sendMenuCommand('replayIntro') },
-    { label: '포켓몬 스프라이트 받기(PokéAPI)', click: () => { if (state) fetchSpeciesSprites(state.species); } },
+    { label: '포켓몬 데이터 받기(PokéAPI)', click: () => { if (state?.hatched) fetchPokeApiRoster(); } },
     { type: 'separator' },
     { label: '종료', click: () => app.quit() },
   ]);
@@ -515,10 +953,11 @@ app.whenReady().then(() => {
   // 최초엔 알 상태(자동 뽑기 없음). 종은 부화("!" 클릭) 시에만 랜덤 결정된다.
   state = loadState(dir);
   state = { ...state, busy: false }; // 재시작 잔여 busy 무시
+  state = ensureBattleProfile(state, Math.random); // 기존 세이브는 최초 1회 DV/stat EXP 생성
   saveState(dir, state);
 
-  // 이미 부화한 경우에만 실제 스프라이트·기술을 PokéAPI에서 캐시(없을 때만, 비동기).
-  if (state.hatched && state.species) { fetchSpeciesSprites(state.species); fetchMovesLine(state.species); }
+  // 이미 부화한 경우 12마리 골드판 스프라이트와 24개 기술을 모두 비동기 캐시한다.
+  if (state.hatched && state.species) fetchPokeApiRoster();
 
   // 렌더러의 수동 드래그 → 창 이동. 네이티브 -webkit-app-region:drag 대신 이 경로를 쓴다
   // (그래야 캔버스 클릭=핀 토글이 드래그 히트테스트에 먹히지 않는다).
@@ -540,7 +979,26 @@ app.whenReady().then(() => {
   });
 
   // 기술 선택 → 현재 디스플레이 전체를 덮는 투명·클릭통과 오버레이 창에서 이펙트 재생.
-  ipcMain.on('pkmn:play-skill', (_e, effect) => playSkillEffect(effect));
+  ipcMain.on('pkmn:play-skill', (_e, effect) => {
+    const sprite = state?.species ? spriteDataUrl(state.species, state.stage || 0) : null;
+    playSkillEffect(effect, sprite ? { sprite } : undefined);
+  });
+
+  ipcMain.on('pkmn:accept-encounter', (_e, encounterId) => {
+    if (!currentEncounter || currentEncounter.id !== encounterId || currentBattle) return;
+    if (Date.now() >= currentEncounter.expiresAt) {
+      finishUnclaimedEncounter();
+      return;
+    }
+    startBattle(currentEncounter);
+  });
+
+  ipcMain.on('pkmn:battle-move', (_e, payload) => resolveBattleMove(payload));
+
+  ipcMain.on('pkmn:leave-battle', (_e, battleId) => {
+    if (!currentBattle || currentBattle.id !== battleId || currentBattle.outcomeCommitted) return;
+    finishBattleSession();
+  });
 
   // 부화: 알("!" 클릭) → 종을 랜덤 결정(rollStarter, Math.random)하고 hatched=true.
   // 종은 이 순간에만 정해지므로 미리 알 수 없고, 결과는 서명 저장되어 편집 시 리셋된다.
@@ -548,9 +1006,10 @@ app.whenReady().then(() => {
     if (!state || state.hatched) return;
     state = rollStarter(state, Math.random); // species 결정 + locked
     state = { ...state, hatched: true };
+    state = ensureBattleProfile(state, Math.random);
     saveState(dataDir(), state);
-    fetchSpeciesSprites(state.species); // 부화한 종의 실제 스프라이트 받기
-    fetchMovesLine(state.species);       // 라인 전체 기술 미리 받기(진화 시 즉시 교체)
+    scheduleNextEncounter();
+    fetchPokeApiRoster();                // 12마리 골드판 스프라이트와 24개 기술 선행 캐시
     playSkillEffect('hatch');            // 화면 전체 부화 연출
     broadcastState({ hatched: true });
   });
@@ -578,6 +1037,10 @@ app.whenReady().then(() => {
   createTray();
 
   intervalId = setInterval(runTick, TICK_MS);
+  scheduleNextEncounter();
+  if (process.env.POCKETMON_FORCE_ENCOUNTER === '1') {
+    setTimeout(() => prepareAndShowWildEncounter(true), 1500);
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -586,4 +1049,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   if (intervalId) clearInterval(intervalId);
+  if (encounterExpiryTimer) clearTimeout(encounterExpiryTimer);
+  if (battleTurnTimer) clearTimeout(battleTurnTimer);
 });

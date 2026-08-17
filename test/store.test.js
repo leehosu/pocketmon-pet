@@ -13,6 +13,7 @@ describe('store', () => {
     const s = loadState(dir);
     expect(s.locked).toBe(false);
     expect(s.level).toBe(1);
+    expect(s.battleProfile).toBe(null);
   });
 
   it('round-trips save/load (plain JSON)', () => {

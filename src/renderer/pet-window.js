@@ -4,6 +4,8 @@ import { drawFrame } from './canvas-render.js';
 import { xpForLevel, XP_RULES } from '../core/xp-engine.js';
 import { getSpeciesByKey, canEvolve } from '../core/roster.js';
 import { spriteKey } from '../core/sprite-files.js';
+import { gen2SkillsForStage } from '../core/gsc-moves.js';
+import { loadSpriteCutout } from './sprite-alpha.js';
 
 // ============================================================
 // 순수 함수 (테스트 대상 — test/anim.test.js)
@@ -42,18 +44,28 @@ export function hudVisible({ hovering, pinned }) {
   return Boolean(hovering || pinned);
 }
 
-// 타입별 오리지널 기술 목록(공식 포켓몬 기술 아님). 각 기술은 이름 + 화면 이펙트 종류.
-const SKILLS_BY_KEY = {
-  grass: [{ name: '잎 흩날리기', effect: 'leaf' }, { name: '새싹 회오리', effect: 'leaf_swirl' }],
-  fire: [{ name: '불꽃 튀기기', effect: 'fire' }, { name: '화염 숨결', effect: 'fire_breath' }],
-  water: [{ name: '물보라', effect: 'water' }, { name: '거품 세례', effect: 'water_bubbles' }],
-  electric: [{ name: '스파크', effect: 'electric' }, { name: '번개 방출', effect: 'electric_bolts' }],
-};
-
 // species(getSpeciesByKey 결과)에 맞는 기술 배열 반환. 없으면 빈 배열.
 export function skillsFor(species) {
   if (!species || !species.key) return [];
-  return SKILLS_BY_KEY[species.key] || [];
+  return gen2SkillsForStage(species.key, 0).map(({ name, effect }) => ({ name, effect }));
+}
+
+export function skillsForState(state) {
+  if (!state || !state.species) return [];
+  return gen2SkillsForStage(state.species, state.stage || 0).map(({ name, effect }) => ({ name, effect }));
+}
+
+export function movesSignature(state) {
+  if (!state || !state.hatched || !state.species) return null;
+  return `${state.species}_${state.stage || 0}`;
+}
+
+export function nextMovesCache(state, currentMoves, currentMovesSig, payloadMoves) {
+  const sig = movesSignature(state);
+  if (!sig) return { moves: null, sig: null };
+  if (payloadMoves && payloadMoves.length) return { moves: payloadMoves, sig };
+  if (currentMovesSig === sig) return { moves: currentMoves, sig };
+  return { moves: skillsForState(state), sig };
 }
 
 // 현재 상태에서 "!" 클릭으로 할 수 있는 행동(순수). 부화 전이면 hatch, 부화 후 진화 가능하면 evolve.
@@ -142,7 +154,8 @@ if (typeof window !== 'undefined') {
   const customImages = new Map(); // key -> HTMLImageElement
   let customKeys = new Set();     // 로드된(로드 시도된) key 집합
   let currentCry = null;          // 현재 종/단계 울음소리 data URL(PokéAPI 런타임 캐시)
-  let currentMoves = null;        // 실제 타입 기술명(PokéAPI 런타임) — 없으면 내장 기본으로 폴백
+  let currentMoves = null;        // 현재 종/단계 기술명 — payload 없으면 내장 단계별 기본으로 폴백
+  let currentMovesSig = null;
 
   // 애니메이션/상호작용 상태
   let hovering = false;
@@ -188,16 +201,14 @@ if (typeof window !== 'undefined') {
     latest = payload;
     const { state, changes, activity, command, customSprites, cry, moves } = payload;
     if (cry) currentCry = cry; // 종/단계 바뀔 때만 실려옴 → 저장
-    if (moves) currentMoves = moves; // 실제 타입 기술명(종 바뀔 때만)
+    ({ moves: currentMoves, sig: currentMovesSig } = nextMovesCache(state, currentMoves, currentMovesSig, moves));
 
     if (customSprites) {
-      // 변경분이 실려온 tick — (재)로드. 로드 실패 시 해당 key는 캐시에 안 잡히므로
-      // pickSpriteKey가 골라도 img.complete 체크에서 걸러져 코드 도트로 자연 폴백된다.
+      // 변경분이 실린 tick에서 Gold PNG 외부 흰 배경을 제거해 다시 로드한다.
       for (const [key, dataUrl] of Object.entries(customSprites)) {
-        const img = new Image();
-        img.onerror = () => { customImages.delete(key); };
-        img.src = dataUrl;
-        customImages.set(key, img);
+        loadSpriteCutout(dataUrl)
+          .then((sprite) => { customImages.set(key, sprite); })
+          .catch(() => { customImages.delete(key); });
       }
       customKeys = new Set(Object.keys(customSprites));
     }
@@ -273,7 +284,7 @@ if (typeof window !== 'undefined') {
     const species = getSpeciesByKey(state.species);
     const d = statusDetail(state, species, xpForLevel, XP_RULES.dailyCap);
     // 실제 PokéAPI 타입 기술명이 있으면 그걸, 없으면 내장 기본 기술로 폴백.
-    const skills = (currentMoves && currentMoves.length) ? currentMoves : skillsFor(species);
+    const skills = (currentMoves && currentMoves.length) ? currentMoves : skillsForState(state);
     const skillBtns = skills
       .map((s) => `<button class="skill-btn" data-effect="${s.effect}">${s.name}</button>`)
       .join('');
@@ -409,8 +420,11 @@ if (typeof window !== 'undefined') {
         // 다운로드된 PokéAPI 이미지는 부화 후에만 사용(알은 항상 코드 도트).
         const customKey = hatched ? pickSpriteKey(customKeys, renderKey, stage) : null;
         const customImg = customKey ? customImages.get(customKey) : null;
+        const customReady = customImg
+          && (customImg.naturalWidth || customImg.width) > 0
+          && (customImg.naturalHeight || customImg.height) > 0;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (customImg && customImg.complete && customImg.naturalWidth > 0) {
+        if (customReady) {
           // 정지 이미지(PokéAPI 다운로드 스프라이트)에 anim별 모션 변형(바운스·뒤뚱·팝)을 입혀 그린다.
           const m = spriteMotion(currentAnim, tickCount);
           const cw = canvas.width, ch = canvas.height;

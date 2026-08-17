@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>pocketmon-pet effect gallery</title>
+  <style>
+    :root{
+      color-scheme:dark;
+      --bg:#0d0d0d;--panel:#1c1c1c;--line:#393939;--text:#f2f2f2;--muted:#aaa;
+      --accent:#f4c542;--grass:#72bf44;--fire:#f07a21;--water:#58b8ff;--electric:#ffe34f;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+    body{display:grid;grid-template-rows:58px minmax(0,1fr)}
+    header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 14px;border-bottom:1px solid var(--line);background:#151515}
+    h1{font-size:16px;margin:0}.hint{color:var(--muted);font-size:12px;margin:0;text-align:right}
+    #list{min-height:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:repeat(3,minmax(0,1fr));gap:8px;padding:8px}
+    .pokemon-card{min-width:0;min-height:0;display:grid;grid-template-columns:minmax(76px,30%) minmax(0,1fr);overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+    .pokemon-thumb{min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;background-color:#272727;background-image:linear-gradient(45deg,#313131 25%,transparent 25%),linear-gradient(-45deg,#313131 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#313131 75%),linear-gradient(-45deg,transparent 75%,#313131 75%);background-size:12px 12px;background-position:0 0,0 6px,6px -6px,-6px 0;border-right:1px solid var(--line)}
+    .pokemon-thumb img{width:min(100%,118px);height:min(100%,118px);object-fit:contain;image-rendering:pixelated}
+    .pokemon-info{min-width:0;min-height:0;display:flex;flex-direction:column;padding:10px}
+    .pokemon-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+    .pokemon-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+    .dex{color:var(--muted);font-size:11px;white-space:nowrap}
+    .type{display:inline-block;align-self:flex-start;margin-bottom:8px;font-size:10px;padding:2px 6px;border-radius:4px;color:#101216}
+    .type.grass{background:var(--grass)} .type.fire{background:var(--fire)}
+    .type.water{background:var(--water)} .type.electric{background:var(--electric)}
+    .moves{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:auto}
+    button{min-width:0;min-height:50px;border:1px solid var(--line);background:#252525;color:var(--text);border-radius:6px;cursor:pointer;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;transition:background .12s,border-color .12s,color .12s,transform .12s}
+    .move-name{display:block;font-weight:700}.move-meta{display:block;margin-top:2px;color:var(--muted);font-size:10px;white-space:normal;overflow-wrap:anywhere}
+    button:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px)}
+    button.active{background:var(--accent);color:#16130a;border-color:var(--accent);box-shadow:0 0 0 2px rgba(244,197,66,.18)}
+    #viewer-layer{display:none;position:fixed;z-index:20;inset:0;background:#101419}
+    #viewer-layer.open{display:block}
+    #viewer{position:absolute;inset:0;width:100%;height:100%;border:0;background:#101419}
+    .viewer-bar{position:absolute;z-index:2;top:0;left:0;right:0;height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid var(--line);background:rgba(16,20,25,.9)}
+    .current{font-weight:700}.effect-id{color:var(--muted);font-size:11px}
+    .viewer-actions{display:flex;gap:6px}.icon-button{width:38px;height:38px;min-height:38px;padding:0;font-size:20px}
+    @media(max-width:1100px){#list{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(4,minmax(0,1fr))}.pokemon-card{grid-template-columns:72px minmax(0,1fr)}.pokemon-info{padding:7px}.pokemon-head,.type{margin-bottom:5px}.move-meta{display:none}}
+    @media(max-width:760px){html,body{height:auto;min-height:100%;overflow:auto}body{display:block}header{height:58px;position:sticky;z-index:5;top:0}#list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:none}.pokemon-card{min-height:170px;grid-template-columns:62px minmax(0,1fr)}.moves{grid-template-columns:1fr}.pokemon-thumb img{width:62px;height:62px}}
+    @media(max-width:480px){#list{grid-template-columns:1fr}.pokemon-card{min-height:142px;grid-template-columns:88px minmax(0,1fr)}.moves{grid-template-columns:repeat(2,minmax(0,1fr))}.hint{display:none}}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Gold/Silver Move Effects</h1>
+    <p class="hint">12마리 · 24개 골드·실버 기술 · PokéAPI</p>
+  </header>
+  <div id="list"></div>
+  <div id="viewer-layer" aria-hidden="true">
+    <iframe id="viewer" title="effect preview" allowtransparency="true"></iframe>
+    <div class="viewer-bar">
+      <div>
+        <div class="current" id="current">기술 선택</div>
+        <div class="effect-id" id="effect-id">-</div>
+      </div>
+      <div class="viewer-actions">
+        <button class="icon-button" id="replay" type="button" title="다시 재생" aria-label="다시 재생">&#8635;</button>
+        <button class="icon-button" id="close-viewer" type="button" title="닫기" aria-label="닫기">&#215;</button>
+      </div>
+    </div>
+  </div>
+  <script type="module">
+    import { loadSpriteCutout } from './sprite-alpha.js';
+
+    const skills = {
+      grass: [
+        [{ slug: 'razor-leaf', name: '잎날가르기', effect: 'gsc_razor_leaf' }, { slug: 'body-slam', name: '누르기', effect: 'gsc_body_slam' }],
+        [{ slug: 'poison-powder', name: '독가루', effect: 'gsc_poisonpowder' }, { slug: 'synthesis', name: '광합성', effect: 'gsc_synthesis' }],
+        [{ slug: 'solar-beam', name: '솔라빔', effect: 'gsc_solarbeam' }, { slug: 'light-screen', name: '빛의장막', effect: 'gsc_light_screen' }],
+      ],
+      fire: [
+        [{ slug: 'ember', name: '불꽃세례', effect: 'gsc_ember' }, { slug: 'smokescreen', name: '연막', effect: 'gsc_smokescreen' }],
+        [{ slug: 'flame-wheel', name: '화염바퀴', effect: 'gsc_flame_wheel' }, { slug: 'swift', name: '스피드스타', effect: 'gsc_swift' }],
+        [{ slug: 'flamethrower', name: '화염방사', effect: 'gsc_flamethrower' }, { slug: 'fire-blast', name: '불대문자', effect: 'gsc_fire_blast' }],
+      ],
+      water: [
+        [{ slug: 'water-gun', name: '물대포', effect: 'gsc_water_gun' }, { slug: 'bite', name: '물기', effect: 'gsc_bite' }],
+        [{ slug: 'ice-punch', name: '냉동펀치', effect: 'gsc_ice_punch' }, { slug: 'scary-face', name: '겁나는얼굴', effect: 'gsc_scary_face' }],
+        [{ slug: 'hydro-pump', name: '하이드로펌프', effect: 'gsc_hydro_pump' }, { slug: 'slash', name: '베어가르기', effect: 'gsc_slash' }],
+      ],
+      electric: [
+        [{ slug: 'thunder-shock', name: '전기쇼크', effect: 'gsc_thundershock' }, { slug: 'sweet-kiss', name: '천사의키스', effect: 'gsc_sweet_kiss' }],
+        [{ slug: 'thunder-wave', name: '전기자석파', effect: 'gsc_thunder_wave' }, { slug: 'quick-attack', name: '전광석화', effect: 'gsc_quick_attack' }],
+        [{ slug: 'thunderbolt', name: '10만볼트', effect: 'gsc_thunderbolt' }, { slug: 'thunder', name: '번개', effect: 'gsc_thunder' }],
+      ],
+    };
+    const roster = [
+      { key: 'grass', type: '풀', stages: [{ name: '치코리타', dex: 152 }, { name: '베이리프', dex: 153 }, { name: '메가니움', dex: 154 }] },
+      { key: 'fire', type: '불', stages: [{ name: '브케인', dex: 155 }, { name: '마그케인', dex: 156 }, { name: '블레이범', dex: 157 }] },
+      { key: 'water', type: '물', stages: [{ name: '리아코', dex: 158 }, { name: '엘리게이', dex: 159 }, { name: '장크로다일', dex: 160 }] },
+      { key: 'electric', type: '전기', stages: [{ name: '피츄', dex: 172 }, { name: '피카츄', dex: 25 }, { name: '라이츄', dex: 26 }] },
+    ];
+    const list = document.getElementById('list');
+    const viewer = document.getElementById('viewer');
+    const viewerLayer = document.getElementById('viewer-layer');
+    const current = document.getElementById('current');
+    const effectId = document.getElementById('effect-id');
+    const replay = document.getElementById('replay');
+    const closeViewer = document.getElementById('close-viewer');
+    let selected = null;
+    const typeNames = { grass: '풀', fire: '불꽃', water: '물', ice: '얼음', electric: '전기', normal: '노말', poison: '독', psychic: '에스퍼', dark: '악', steel: '강철', fighting: '격투' };
+    const classNames = { physical: '물리', special: '특수', status: '변화' };
+    const physicalTypes = new Set(['normal', 'fighting', 'flying', 'poison', 'ground', 'rock', 'bug', 'ghost', 'steel']);
+
+    function goldSpriteUrl(key, stage) {
+      return `./assets/pokemon/gold/${key}_${stage}.png`;
+    }
+
+    function resourceId(resource) {
+      const match = String(resource?.url || '').match(/\/(\d+)\/?$/);
+      return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
+    }
+
+    function goldSilverValue(move, field) {
+      const future = (move.past_values || [])
+        .filter((entry) => resourceId(entry.version_group) > 3 && entry[field] != null)
+        .sort((a, b) => resourceId(a.version_group) - resourceId(b.version_group))[0];
+      return future ? future[field] : move[field];
+    }
+
+    async function loadMoveMeta(button, move) {
+      try {
+        const response = await fetch(`https://pokeapi.co/api/v2/move/${move.slug}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const typeKey = goldSilverValue(data, 'type')?.name || data.type?.name;
+        const type = typeNames[typeKey] || typeKey || '-';
+        const classKey = data.damage_class?.name === 'status' ? 'status' : (physicalTypes.has(typeKey) ? 'physical' : 'special');
+        const power = goldSilverValue(data, 'power');
+        const accuracy = goldSilverValue(data, 'accuracy');
+        const pp = goldSilverValue(data, 'pp');
+        button.querySelector('.move-meta').textContent = `${type} · ${classNames[classKey]} · 위력 ${power ?? '-'} · 명중 ${accuracy ?? '-'} · PP ${pp ?? '-'}`;
+        const flavor = (data.flavor_text_entries || []).find((entry) => entry.version_group?.name === 'gold-silver' && entry.language?.name === 'en');
+        if (flavor) button.title = flavor.flavor_text.replace(/\s+/g, ' ').trim();
+      } catch { /* 오프라인에서는 기술명만 표시 */ }
+    }
+
+    function play(sel) {
+      selected = sel;
+      current.textContent = `${sel.mon} / ${sel.move}`;
+      effectId.textContent = sel.effect;
+      const params = new URLSearchParams({ effect: sel.effect, sprite: sel.sprite, preview: '1', t: Date.now() });
+      viewer.src = `./effect-overlay.html?${params}`;
+      viewerLayer.classList.add('open');
+      viewerLayer.setAttribute('aria-hidden', 'false');
+      document.querySelectorAll('button[data-effect]').forEach((b) => b.classList.toggle('active', b.dataset.uid === sel.uid));
+    }
+
+    function closeEffect() {
+      viewerLayer.classList.remove('open');
+      viewerLayer.setAttribute('aria-hidden', 'true');
+      viewer.src = 'about:blank';
+    }
+
+    for (const sp of roster) {
+      sp.stages.forEach((pokemon, idx) => {
+        const sprite = goldSpriteUrl(sp.key, idx);
+        const card = document.createElement('article');
+        card.className = 'pokemon-card';
+        card.innerHTML = `<div class="pokemon-thumb"><img alt="${pokemon.name} 골드 스프라이트"></div><div class="pokemon-info"><div class="pokemon-head"><span class="pokemon-name">${pokemon.name}</span><span class="dex">No.${pokemon.dex}</span></div><span class="type ${sp.key}">${sp.type}</span><div class="moves"></div></div>`;
+        const image = card.querySelector('img');
+        loadSpriteCutout(sprite)
+          .then((canvas) => { image.src = canvas.toDataURL('image/png'); })
+          .catch(() => { image.src = sprite; });
+        const moves = card.querySelector('.moves');
+        skills[sp.key][idx].forEach((mv) => {
+          const btn = document.createElement('button');
+          const uid = `${pokemon.name}:${mv.effect}`;
+          btn.type = 'button';
+          btn.innerHTML = `<span class="move-name">${mv.name}</span><span class="move-meta">PokéAPI 조회 중</span>`;
+          btn.dataset.effect = mv.effect;
+          btn.dataset.uid = uid;
+          btn.addEventListener('click', () => play({ uid, mon: pokemon.name, move: mv.name, effect: mv.effect, sprite }));
+          moves.appendChild(btn);
+          loadMoveMeta(btn, mv);
+        });
+        list.appendChild(card);
+      });
+    }
+    replay.addEventListener('click', () => { if (selected) play(selected); });
+    closeViewer.addEventListener('click', closeEffect);
+    window.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeEffect(); });
+  </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  dexLine, spriteUrl, cryUrl, pokemonUrl, typeUrl, moveUrl,
-  SPRITE_BASE, CRY_BASE, API_BASE,
+  dexLine, spriteUrl, cryUrl, pokemonUrl, pokemonSpeciesUrl, pokemonEncountersUrl, typeUrl, moveUrl,
+  moveValueForVersion, SPRITE_BASE, CRY_BASE, API_BASE,
 } from '../src/core/pokeapi.js';
 
 describe('pokeapi', () => {
@@ -29,8 +29,23 @@ describe('pokeapi', () => {
 
   it('builds REST API URLs (pokemon/type/move)', () => {
     expect(pokemonUrl(25)).toBe(`${API_BASE}/pokemon/25`);
+    expect(pokemonSpeciesUrl(25)).toBe(`${API_BASE}/pokemon-species/25`);
+    expect(pokemonEncountersUrl(25)).toBe(`${API_BASE}/pokemon/25/encounters`);
     expect(typeUrl('electric')).toBe(`${API_BASE}/type/electric`);
     expect(moveUrl('thunderbolt')).toBe(`${API_BASE}/move/thunderbolt`);
     expect(API_BASE.startsWith('https://')).toBe(true);
+  });
+
+  it('restores move stats for Gold/Silver from later past-value changes', () => {
+    const thunder = {
+      power: 110,
+      pp: 10,
+      past_values: [
+        { power: null, pp: null, version_group: { url: `${API_BASE}/version-group/3/` } },
+        { power: 120, pp: null, version_group: { url: `${API_BASE}/version-group/15/` } },
+      ],
+    };
+    expect(moveValueForVersion(thunder, 'power')).toBe(120);
+    expect(moveValueForVersion(thunder, 'pp')).toBe(10);
   });
 });
