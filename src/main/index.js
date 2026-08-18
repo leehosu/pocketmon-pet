@@ -787,16 +787,19 @@ function createBattleWindow(anchorBounds) {
   const win = new BrowserWindow({
     x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
     transparent: true, backgroundColor: '#00000000', frame: false, hasShadow: false,
-    resizable: false, movable: false, minimizable: false, maximizable: false,
+    resizable: false, movable: true, minimizable: false, maximizable: false,
     skipTaskbar: true,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      autoplayPolicy: 'no-user-gesture-required',
+      backgroundThrottling: false,
     },
   });
   battleWindow = win;
+  win.webContents.setAudioMuted(false);
   win.setBackgroundColor('#00000000');
   win.setAlwaysOnTop(true, 'floating');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
