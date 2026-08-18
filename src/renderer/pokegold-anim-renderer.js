@@ -96,10 +96,37 @@ export function pokegoldLayout(width, height) {
   };
 }
 
+// AI-GENERATED: 컴팩트 배틀 DOM의 실제 아군·적 스프라이트 중심에 기술 좌표를 맞춘다.
+export function pokegoldBattleLayout(width, height) {
+  const inset = 12;
+  const stageWidth = Math.max(1, width - inset * 2);
+  const stageHeight = Math.max(1, height - inset * 2);
+  const user = {
+    x: inset + stageWidth * (0.05 + 0.38 / 2),
+    y: inset + stageHeight * (0.25 + 0.35 / 2),
+  };
+  const target = {
+    x: inset + stageWidth * (0.58 + 0.34 / 2),
+    y: inset + stageHeight * (0.02 + 0.34 / 2),
+  };
+  const shortSide = Math.min(width, height);
+
+  return {
+    coordinateScaleX: (target.x - user.x) / (TARGET_ANCHOR.x - USER_ANCHOR.x),
+    coordinateScaleY: (target.y - user.y) / (TARGET_ANCHOR.y - USER_ANCHOR.y),
+    effectScale: clampedIntegerScale(shortSide, 180, 5),
+    pokemonScale: clampedIntegerScale(shortSide, 240, 3),
+    user,
+    target,
+  };
+}
+
 function nativeToScreen(x, y, layout) {
   return {
-    x: Math.round(layout.user.x + (x - USER_ANCHOR.x) * layout.coordinateScale),
-    y: Math.round(layout.user.y + (y - USER_ANCHOR.y) * layout.coordinateScale),
+    x: Math.round(layout.user.x + (x - USER_ANCHOR.x)
+      * (layout.coordinateScaleX ?? layout.coordinateScale)),
+    y: Math.round(layout.user.y + (y - USER_ANCHOR.y)
+      * (layout.coordinateScaleY ?? layout.coordinateScale)),
   };
 }
 
@@ -196,9 +223,14 @@ export class PokegoldAnimationRenderer {
     return this;
   }
 
-  render(context, state, { pokemonSprite = null, width = context.canvas.width, height = context.canvas.height } = {}) {
+  render(context, state, {
+    pokemonSprite = null,
+    width = context.canvas.width,
+    height = context.canvas.height,
+    layout: suppliedLayout = null,
+  } = {}) {
     if (!this.sheets) return false;
-    const layout = pokegoldLayout(width, height);
+    const layout = suppliedLayout || pokegoldLayout(width, height);
     const behind = state.objects.filter(({ priority }) => priority);
     const front = state.objects.filter(({ priority }) => !priority);
     behind.forEach((object) => drawObject(context, state, object, this.sheets, layout));

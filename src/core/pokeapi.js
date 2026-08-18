@@ -5,6 +5,7 @@
 
 export const SPRITE_BASE =
   'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-ii/gold';
+export const BACK_SPRITE_BASE = `${SPRITE_BASE}/back`;
 // 울음소리도 앱에 번들하지 않고 공개 PokéAPI cries 저장소에서 런타임에 받는다.
 export const CRY_BASE =
   'https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest';
@@ -23,6 +24,11 @@ export function dexLine(key) {
 
 export function spriteUrl(dexId) {
   return `${SPRITE_BASE}/${dexId}.png`;
+}
+
+// AI-GENERATED: 원작 배틀에서 아군이 상대를 바라볼 때 쓰는 Gold 후면 스프라이트.
+export function backSpriteUrl(dexId) {
+  return `${BACK_SPRITE_BASE}/${dexId}.png`;
 }
 
 export function cryUrl(dexId) {

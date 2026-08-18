@@ -11,7 +11,7 @@ import {
   POKEGOLD_SOURCE,
 } from '../src/renderer/pokegold-anim-data.js';
 import { PokegoldAnimationVM } from '../src/renderer/pokegold-anim-vm.js';
-import { pokegoldLayout } from '../src/renderer/pokegold-anim-renderer.js';
+import { pokegoldBattleLayout, pokegoldLayout } from '../src/renderer/pokegold-anim-renderer.js';
 import { POKEGOLD_SUPPORTED_CALLBACKS } from '../src/renderer/pokegold-object-engine.js';
 
 describe('Gold/Silver move roster', () => {
@@ -106,5 +106,13 @@ describe('Gold/Silver move roster', () => {
     expect(desktop.target.x - desktop.user.x).toBeCloseTo(900 * 0.42);
     expect(desktop.effectScale).toBe(5);
     expect(desktop.pokemonScale).toBe(3);
+  });
+
+  it('anchors compact battle effects to the visible Pokemon centers', () => {
+    const layout = pokegoldBattleLayout(600, 460);
+    expect(layout.user.x).toBeCloseTo(150.24);
+    expect(layout.user.y).toBeCloseTo(197.3);
+    expect(layout.target.x).toBeCloseTo(444);
+    expect(layout.target.y).toBeCloseTo(94.84);
   });
 });

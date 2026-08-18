@@ -17,7 +17,7 @@ import { parseSessionLines, parseCodexLines, sessionScanFloor } from '../core/se
 import { tick } from './orchestrator.js';
 import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
 import {
-  dexLine, spriteUrl, cryUrl, pokemonUrl, moveUrl, moveValueForVersion,
+  dexLine, spriteUrl, backSpriteUrl, cryUrl, pokemonUrl, moveUrl, moveValueForVersion,
 } from '../core/pokeapi.js';
 import { GEN2_EFFECTS, gen2SkillsForStage } from '../core/gsc-moves.js';
 import { applyBattleExperience, localDateKey } from '../core/xp-engine.js';
@@ -36,6 +36,7 @@ import {
 } from '../core/encounter-scheduler.js';
 import { chooseWildEncounter } from '../core/wild-catalog.js';
 import { prepareWildPokemon } from './wild-service.js';
+import { battleWindowBounds } from '../core/battle-window-bounds.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -54,6 +55,9 @@ const POKEGOLD_EFFECT_DURATION_MS = 4300;
 const RESULT_HOLD_MS = 3000;
 const WILD_WINDOW_WIDTH = 180;
 const WILD_WINDOW_HEIGHT = 190;
+// AI-GENERATED: 작업 화면을 가리지 않는 단일 플로팅 배틀 스테이지 크기.
+const BATTLE_WINDOW_WIDTH = 600;
+const BATTLE_WINDOW_HEIGHT = 460;
 const EFFECT_TYPES = [
   'leaf', 'leaf_swirl',
   'fire', 'fire_breath',
@@ -247,9 +251,9 @@ function driftWindow(activity) {
 // 만든 시그니처가 바뀔 때만(=최초 1회 포함, 다운로드 완료 반영 포함) 재로드해 payload에 싣는다.
 let customSpritesSignature = null;
 
-// 기술 이펙트: 현재 디스플레이 전체를 덮는 투명·클릭통과 오버레이 창을 만들어
-// 타입별 파티클 애니(effect-overlay)를 재생하고 EFFECT_DURATION_MS 후 자동 종료.
-function playSkillEffect(effect, opts) {
+// 기술 이펙트: 투명·클릭통과 오버레이 창에서 재생한다.
+// 일반 기술은 디스플레이 전체, 배틀 기술은 컴팩트 배틀 창 영역만 사용한다.
+function playSkillEffect(effect, opts, targetBounds) {
   if (!EFFECT_TYPES.includes(effect)) return;
   // 이전 이펙트가 남아 있으면 먼저 정리(중첩 방지).
   if (effectWin && !effectWin.isDestroyed()) { effectWin.close(); }
@@ -258,7 +262,7 @@ function playSkillEffect(effect, opts) {
   const disp = mainWindow && !mainWindow.isDestroyed()
     ? screen.getDisplayMatching(mainWindow.getBounds())
     : screen.getPrimaryDisplay();
-  const b = disp.bounds;
+  const b = targetBounds || disp.bounds;
 
   const win = new BrowserWindow({
     x: b.x, y: b.y, width: b.width, height: b.height,
@@ -292,6 +296,14 @@ function spriteDataUrl(species, stage) {
   } catch { return null; }
 }
 
+function backSpriteDataUrl(species, stage) {
+  try {
+    const p = join(spritesDirPath(), `${species}_${stage}_back.png`);
+    if (!existsSync(p)) return null;
+    return 'data:image/png;base64,' + readFileSync(p).toString('base64');
+  } catch { return null; }
+}
+
 // 공개 URL을 파일로 다운로드(리다이렉트 추적, tmp→rename). 실패는 콜백으로 전달.
 function downloadTo(url, dest, cb, redirects) {
   redirects = redirects || 0;
@@ -316,8 +328,8 @@ function downloadTo(url, dest, cb, redirects) {
   req.setTimeout(10000, () => req.destroy(new Error('timeout')));
 }
 
-// 현재 종의 진화 라인 골드판 스프라이트를 공개 PokéAPI에서 런타임 다운로드해
-// ~/.pocketmon/dex/<key>_<stage>.png 로 캐시(앱에 번들하지 않음). 이미 있으면 건너뛴다.
+// 현재 종의 진화 라인 골드판 정면·후면 스프라이트를 공개 PokéAPI에서 런타임 다운로드해
+// ~/.pocketmon/dex/에 캐시(앱에 번들하지 않음). 이미 있으면 건너뛴다.
 // 실패/오프라인은 조용히 무시 — 기존 코드 도트로 폴백. 다운로드 성공 시 다음 tick의
 // 스프라이트 폴더 서명 갱신이 자동으로 렌더러에 반영한다.
 function fetchSpeciesSprites(key) {
@@ -326,7 +338,7 @@ function fetchSpeciesSprites(key) {
   const dir = spritesDirPath();
   const cdir = criesDirPath();
   try { mkdirSync(dir, { recursive: true }); mkdirSync(cdir, { recursive: true }); } catch { return; }
-  const marker = join(dir, `.pokeapi-gold-${key}-v1`);
+  const marker = join(dir, `.pokeapi-gold-${key}-v2`);
   const refreshGoldSprites = !existsSync(marker);
   let pending = 0;
   let failed = false;
@@ -345,6 +357,11 @@ function fetchSpeciesSprites(key) {
     if (refreshGoldSprites || !existsSync(png)) {
       pending += 1;
       downloadTo(spriteUrl(dexId), png, done);
+    }
+    const backPng = join(dir, `${key}_${stage}_back.png`);
+    if (refreshGoldSprites || !existsSync(backPng)) {
+      pending += 1;
+      downloadTo(backSpriteUrl(dexId), backPng, done);
     }
     // 울음소리(.ogg)도 같은 방식으로 런타임 캐시.
     const ogg = join(cdir, `${key}_${stage}.ogg`);
@@ -712,6 +729,7 @@ function battlePayload(events = []) {
     events,
     playerMoves: currentBattle.playerMoves,
     playerSprite: currentBattle.playerSprite,
+    playerSpriteIsBack: currentBattle.playerSpriteIsBack,
     enemySprite: currentBattle.encounter.sprite,
     enemyCry: currentBattle.encounter.cry,
   };
@@ -741,16 +759,21 @@ function finishBattleSession() {
   nextEncounterAt = 0;
 }
 
-function createBattleWindow() {
-  const display = mainWindow && !mainWindow.isDestroyed()
-    ? screen.getDisplayMatching(mainWindow.getBounds())
-    : screen.getPrimaryDisplay();
-  const bounds = display.bounds;
+function createBattleWindow(anchorBounds) {
+  const display = anchorBounds
+    ? screen.getDisplayMatching(anchorBounds)
+    : (mainWindow && !mainWindow.isDestroyed()
+      ? screen.getDisplayMatching(mainWindow.getBounds())
+      : screen.getPrimaryDisplay());
+  const bounds = battleWindowBounds(display.workArea, anchorBounds, {
+    width: BATTLE_WINDOW_WIDTH,
+    height: BATTLE_WINDOW_HEIGHT,
+  });
   const win = new BrowserWindow({
     x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
     transparent: true, backgroundColor: '#00000000', frame: false, hasShadow: false,
     resizable: false, movable: false, minimizable: false, maximizable: false,
-    skipTaskbar: true, enableLargerThanScreen: true,
+    skipTaskbar: true,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -760,7 +783,7 @@ function createBattleWindow() {
   });
   battleWindow = win;
   win.setBackgroundColor('#00000000');
-  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setAlwaysOnTop(true, 'floating');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(join(__dirname, '../renderer/battle-window.html'));
   win.webContents.once('did-finish-load', () => sendBattleState());
@@ -776,12 +799,16 @@ function createBattleWindow() {
 }
 
 function startBattle(encounter) {
+  const encounterBounds = wildWindow && !wildWindow.isDestroyed()
+    ? wildWindow.getBounds()
+    : null;
   state = ensureBattleProfile(state, Math.random);
   const line = dexLine(state.species);
   const playerSpeciesId = line[state.stage || 0];
   const roster = getSpeciesByKey(state.species);
   const playerName = roster?.stages[state.stage || 0]?.name || '포켓몬';
   const playerMoves = gen2SkillsForStage(state.species, state.stage || 0);
+  const playerBackSprite = backSpriteDataUrl(state.species, state.stage || 0);
   const enemyDvs = createBattleProfile(Math.random).dvs;
   const battle = createGen2Battle({
     player: {
@@ -806,7 +833,8 @@ function startBattle(encounter) {
     encounter,
     battle,
     playerMoves,
-    playerSprite: spriteDataUrl(state.species, state.stage || 0),
+    playerSprite: playerBackSprite || spriteDataUrl(state.species, state.stage || 0),
+    playerSpriteIsBack: Boolean(playerBackSprite),
     resolving: false,
     outcomeCommitted: false,
     reward: 0,
@@ -815,7 +843,7 @@ function startBattle(encounter) {
   currentEncounter = null;
   closeWildWindow();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
-  createBattleWindow();
+  createBattleWindow(encounterBounds);
 }
 
 function commitBattleOutcome() {
@@ -847,8 +875,11 @@ function playResolvedPlayerEffect(events) {
   if (chargeOnly) return;
   const move = currentBattle.playerMoves.find((entry) => entry.slug === moveEvent.moveSlug);
   if (!move) return;
-  const opts = currentBattle.playerSprite ? { sprite: currentBattle.playerSprite } : undefined;
-  playSkillEffect(move.effect, opts);
+  const effectBounds = battleWindow && !battleWindow.isDestroyed()
+    ? battleWindow.getBounds()
+    : undefined;
+  // 배틀 DOM에 아군이 이미 있으므로 오버레이에는 스프라이트를 다시 그리지 않는다.
+  playSkillEffect(move.effect, { layout: 'battle' }, effectBounds);
 }
 
 function resolveBattleMove(payload) {

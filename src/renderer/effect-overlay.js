@@ -1,5 +1,5 @@
 import { loadSpriteCutout } from './sprite-alpha.js';
-import { PokegoldAnimationRenderer } from './pokegold-anim-renderer.js';
+import { PokegoldAnimationRenderer, pokegoldBattleLayout } from './pokegold-anim-renderer.js';
 import { PokegoldAnimationVM } from './pokegold-anim-vm.js';
 
 // Gold 기술은 pret/pokegold VM으로, 부화/진화 연출은 기존 canvas 애니메이션으로 재생한다.
@@ -7,6 +7,7 @@ import { PokegoldAnimationVM } from './pokegold-anim-vm.js';
   const query = new URLSearchParams(location.search);
   const effect = query.get('effect') || 'leaf';
   const spriteSource = query.get('sprite');
+  const useBattleLayout = query.get('layout') === 'battle';
   const isPreview = query.get('preview') === '1';
   const frozenFrame = query.has('frame') ? Math.max(0, Number(query.get('frame')) || 0) : null;
   const isPokegold = effect.startsWith('gsc_');
@@ -325,7 +326,8 @@ import { PokegoldAnimationVM } from './pokegold-anim-vm.js';
     if (isPokegold) {
       const targetFrame = frozenFrame ?? Math.floor(elapsed * 60 / 1000);
       const state = pokegoldVm.seek(targetFrame);
-      pokegoldRenderer.render(ctx, state, { pokemonSprite, width: W, height: H });
+      const layout = useBattleLayout ? pokegoldBattleLayout(W, H) : null;
+      pokegoldRenderer.render(ctx, state, { pokemonSprite, width: W, height: H, layout });
       document.documentElement.dataset.pokegoldFrame = String(state.frame);
       document.documentElement.dataset.pokegoldDone = String(state.done);
       if (frozenFrame != null) return;
