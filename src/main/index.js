@@ -13,7 +13,7 @@ import { dataDir, EVENTS_FILE } from '../core/paths.js';
 import { compactEventsFile } from '../core/events-log.js';
 import { loadState, saveState, rollStarter } from '../core/store.js';
 import { getSpeciesByKey, canEvolve } from '../core/roster.js';
-import { parseSessionLines, parseCodexLines } from '../core/session-parser.js';
+import { parseSessionLines, parseCodexLines, sessionScanFloor } from '../core/session-parser.js';
 import { tick } from './orchestrator.js';
 import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
 import {
@@ -67,9 +67,13 @@ const SPECIES_KEYS = ['grass', 'fire', 'water', 'electric'];
 const DRIFT_STEP_BUSY = 6; // 프롬프트 처리중(달리기) — 크게 움직임
 const DRIFT_STEP_IDLE = 1; // 평상시 — 가끔 조금만 움직임
 const IDLE_MOVE_CHANCE = 0.15;
-// 첫 실행 시 몇 달치 세션 로그를 한꺼번에 XP로 소급 반영하지 않도록,
-// lastSessionTs가 없으면(0) "최근 24시간"만 소급 범위로 삼는다.
-const FIRST_RUN_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
+// 첫 실행 시 과거 세션 로그를 소급해 XP로 주지 않는다(0 = 앱을 켠 이후 활동만 인정).
+// 알을 "키우는" 연출이 성립하려면 설치 순간 XP가 들어오면 안 된다 — 소급이 살아 있으면
+// 부화 문턱(XP_RULES.hatchXp)을 아무리 올려도 하루치가 통째로 들어와 그냥 넘어간다.
+const FIRST_RUN_SESSION_WINDOW_MS = 0;
+// 앱을 켠 시각 기준으로 한 번만 계산한다(매 tick 재계산하면 floor가 현재로 계속 밀려
+// 어떤 이벤트도 잡히지 않는다 — sessionScanFloor 주석 참고).
+const FIRST_RUN_FLOOR = Date.now() - FIRST_RUN_SESSION_WINDOW_MS;
 const OFFSET_FILE = 'offset';
 
 // 16x16 포켓볼 스타일 트레이 아이콘(외부 에셋 없이 인라인 PNG로 제공).
@@ -199,7 +203,7 @@ function scanSessionRoot(root, floor, parser) {
 // 권위 토큰 소스: Claude Code(~/.claude/projects) + Codex(~/.codex/sessions) 세션 로그.
 // 두 소스의 ts는 모두 ISO(Date.parse)라 lastSessionTs 커서·일일 상한을 그대로 공유한다.
 function readSessionEvents(sinceTs) {
-  const floor = sinceTs > 0 ? sinceTs : Date.now() - FIRST_RUN_SESSION_WINDOW_MS;
+  const floor = sessionScanFloor(sinceTs, FIRST_RUN_FLOOR);
   return [
     ...scanSessionRoot(join(homedir(), '.claude', 'projects'), floor, parseSessionLines),
     ...scanSessionRoot(join(homedir(), '.codex', 'sessions'), floor, parseCodexLines),

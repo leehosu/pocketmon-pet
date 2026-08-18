@@ -2,8 +2,14 @@ import { getSpeciesByKey, stageForLevel } from './roster.js';
 
 export const XP_RULES = {
   perToolUse: 2, perSessionStart: 5,
-  perTokens: 1, tokensUnit: 1000, dailyCap: 500,
-  hatchXp: 30, // 알이 부화 가능(느낌표) 상태가 되는 최소 누적 XP
+  perTokens: 1, tokensUnit: 1000,
+  // 실사용을 클램프하지 않는 값으로 잡는다. 하루 생성량 실측이 평균 1,057 / 최대 1,790 XP라
+  // 상한 500은 절반 이상을 버렸다. 2,000이면 가장 많이 쓴 날도 그대로 반영된다.
+  dailyCap: 2000,
+  // 알이 부화 가능(느낌표) 상태가 되는 최소 누적 XP. 실측 기준 활동 이틀치.
+  // 소급 창(FIRST_RUN_SESSION_WINDOW_MS)이 0이어야 이 값이 의미를 갖는다 —
+  // 소급이 살아 있으면 설치 순간 하루치가 들어와 문턱을 그냥 넘는다.
+  hatchXp: 2000,
 };
 
 // seenIds는 "이미 XP로 반영한 이벤트" 중복 방지용이다. 중복 차단은 이미 두 겹으로
