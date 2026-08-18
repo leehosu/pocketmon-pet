@@ -40,7 +40,11 @@ import { prepareWildPokemon } from './wild-service.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const TICK_MS = 4000;
-const WINDOW_SIZE = 96;
+const WINDOW_SIZE = 96; // 스프라이트 캔버스(가로=세로)
+// 호버 시 뜨는 XP 바·상태 텍스트를 포켓몬 아래에 두기 위한 여유 높이.
+// 창은 투명이라 평상시엔 빈 공간이 보이지 않는다.
+const HUD_HEIGHT = 28;
+const WINDOW_HEIGHT = WINDOW_SIZE + HUD_HEIGHT;
 // 더블클릭 상세 패널(상태 + 기술 버튼)을 담기 위해 창을 잠깐 확장할 크기(닫으면 WINDOW_SIZE로 원복).
 const DETAIL_WIDTH = 210;
 const DETAIL_HEIGHT = 320;
@@ -892,9 +896,9 @@ function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
   mainWindow = new BrowserWindow({
     width: WINDOW_SIZE,
-    height: WINDOW_SIZE,
+    height: WINDOW_HEIGHT,
     x: Math.floor(workArea.x + workArea.width / 2 - WINDOW_SIZE / 2),
-    y: workArea.y + workArea.height - WINDOW_SIZE - 24,
+    y: workArea.y + workArea.height - WINDOW_HEIGHT - 24,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -987,7 +991,7 @@ app.whenReady().then(() => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const [x, y] = mainWindow.getPosition();
     const w = open ? DETAIL_WIDTH : WINDOW_SIZE;
-    const h = open ? DETAIL_HEIGHT : WINDOW_SIZE;
+    const h = open ? DETAIL_HEIGHT : WINDOW_HEIGHT;
     mainWindow.setBounds({ x, y, width: w, height: h });
   });
 
