@@ -285,12 +285,16 @@ if (typeof window !== 'undefined') {
     const d = statusDetail(state, species, xpForLevel, XP_RULES.dailyCap);
     // 실제 PokéAPI 타입 기술명이 있으면 그걸, 없으면 내장 기본 기술로 폴백.
     const skills = (currentMoves && currentMoves.length) ? currentMoves : skillsForState(state);
+    // 기술명은 PokéAPI에서 런타임에 받아온 원격 문자열이라 innerHTML에 그대로 넣지 않는다.
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
     const skillBtns = skills
-      .map((s) => `<button class="skill-btn" data-effect="${s.effect}">${s.name}</button>`)
+      .map((s) => `<button class="skill-btn" data-effect="${esc(s.effect)}">${esc(s.name)}</button>`)
       .join('');
     detailEl.innerHTML = [
-      `<div class="d-name">${d.name}</div>`,
-      `<div class="d-row"><span>타입</span><b>${d.type}</b></div>`,
+      `<div class="d-name">${esc(d.name)}</div>`,
+      `<div class="d-row"><span>타입</span><b>${esc(d.type)}</b></div>`,
       `<div class="d-row"><span>단계</span><b>${d.stageLabel}</b></div>`,
       `<div class="d-row"><span>레벨</span><b>Lv.${d.level}</b></div>`,
       `<div class="d-row"><span>이번 레벨</span><b>${d.xpInLevel}/${d.xpNeededThisLevel} XP</b></div>`,

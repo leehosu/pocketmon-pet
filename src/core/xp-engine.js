@@ -2,12 +2,47 @@ import { getSpeciesByKey, stageForLevel } from './roster.js';
 
 export const XP_RULES = {
   perToolUse: 2, perSessionStart: 5,
-  perTokens: 1, tokensUnit: 1000, dailyCap: 500,
-  hatchXp: 30, // 알이 부화 가능(느낌표) 상태가 되는 최소 누적 XP
+  perTokens: 1, tokensUnit: 1000,
+  // 실사용을 클램프하지 않는 값으로 잡는다. 하루 생성량 실측이 평균 1,057 / 최대 1,790 XP라
+  // 상한 500은 절반 이상을 버렸다. 2,000이면 가장 많이 쓴 날도 그대로 반영된다.
+  dailyCap: 2000,
+  // 알이 부화 가능(느낌표) 상태가 되는 최소 누적 XP. 실측 기준 활동 이틀치.
+  // 소급 창(FIRST_RUN_SESSION_WINDOW_MS)이 0이어야 이 값이 의미를 갖는다 —
+  // 소급이 살아 있으면 설치 순간 하루치가 들어와 문턱을 그냥 넘는다.
+  hatchXp: 2000,
 };
 
+// seenIds는 "이미 XP로 반영한 이벤트" 중복 방지용이다. 중복 차단은 이미 두 겹으로
+// 걸려 있고(hook은 ~/.pocketmon/offset, session 로그는 lastSessionTs 커서), seenIds는
+// 그 커서가 저장에 실패한 tick을 막는 마지막 그물이다. 즉 "최근 몇 tick" 범위만 필요한데
+// 무제한 누적하면 save.json이 영구히 커지고(토큰 이벤트는 어시스턴트 메시지마다 1건)
+// 매 tick 전체를 pretty-print로 다시 쓰게 된다. 최근 N개로 자른다.
+export const SEEN_ID_LIMIT = 2000;
+
+export function trimSeenIds(ids) {
+  if (!Array.isArray(ids)) return [];
+  return ids.length > SEEN_ID_LIMIT ? ids.slice(-SEEN_ID_LIMIT) : ids;
+}
+
+// 일일 상한(dailyCap)의 "하루"는 사용자가 체감하는 로컬 자정 기준이어야 한다.
+// toISOString()은 UTC라 KST(+9)에선 매일 오전 9시에 상한이 리셋된다.
+export function localDateKey(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+// 레벨 곡선의 계수. 곡선 모양(^1.5)은 그대로 두고 계수만 올려 레벨업 페이스를 유지한다.
+//
+// 일일 상한을 500 → 2,000으로 올리면서 실효 XP가 활동일당 458 → 1,060(2.31배)이 됐다.
+// 계수를 그대로 100에 두면 최종 진화가 40일 → 16일로 줄어 "키우는" 맛이 사라진다.
+// 같은 배율(2.31)을 곡선에 실어 도달 시점을 상한 500 시절로 되돌린다.
+// 실측 검증(활동일): Lv.16 14일→14일, Lv.25 27일→27일, Lv.32 40일→38일.
+//
+// 지수를 올리는 방식(^1.8 등)도 검토했으나 고레벨에서 과교정된다(Lv.32가 40일→48일).
+export const LEVEL_XP_BASE = 231;
+
 export function xpForLevel(level) {
-  return Math.floor(100 * Math.pow(level, 1.5));
+  return Math.floor(LEVEL_XP_BASE * Math.pow(level, 1.5));
 }
 
 export function levelForXp(xp) {
@@ -45,6 +80,7 @@ export function applyEvents(state, events, opts) {
     if (e.kind === 'toolUse' || e.kind === 'sessionStart') reactions++;
   }
 
+  s.seenIds = trimSeenIds(s.seenIds);
   s.level = levelForXp(s.xp);
   // 진화는 자동이 아니라 사용자 클릭("!")으로만 일어난다. 여기서는 stage를 올리지 않고
   // 레벨이 허용하는 최대 단계로만 clamp(치팅으로 과도하게 올린 값 방어). 저장된 stage는 유지.

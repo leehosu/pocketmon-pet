@@ -10,16 +10,17 @@ import { randomUUID } from 'node:crypto';
 import https from 'node:https';
 
 import { dataDir, EVENTS_FILE } from '../core/paths.js';
+import { compactEventsFile } from '../core/events-log.js';
 import { loadState, saveState, rollStarter } from '../core/store.js';
 import { getSpeciesByKey, canEvolve } from '../core/roster.js';
-import { parseSessionLines, parseCodexLines } from '../core/session-parser.js';
-import { tick, ensureStarter } from './orchestrator.js';
+import { parseSessionLines, parseCodexLines, sessionScanFloor } from '../core/session-parser.js';
+import { tick } from './orchestrator.js';
 import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
 import {
   dexLine, spriteUrl, cryUrl, pokemonUrl, moveUrl, moveValueForVersion,
 } from '../core/pokeapi.js';
 import { GEN2_EFFECTS, gen2SkillsForStage } from '../core/gsc-moves.js';
-import { applyBattleExperience } from '../core/xp-engine.js';
+import { applyBattleExperience, localDateKey } from '../core/xp-engine.js';
 import {
   createBattleProfile,
   ensureBattleProfile,
@@ -39,7 +40,11 @@ import { prepareWildPokemon } from './wild-service.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const TICK_MS = 4000;
-const WINDOW_SIZE = 96;
+const WINDOW_SIZE = 96; // 스프라이트 캔버스(가로=세로)
+// 호버 시 뜨는 XP 바·상태 텍스트를 포켓몬 아래에 두기 위한 여유 높이.
+// 창은 투명이라 평상시엔 빈 공간이 보이지 않는다.
+const HUD_HEIGHT = 28;
+const WINDOW_HEIGHT = WINDOW_SIZE + HUD_HEIGHT;
 // 더블클릭 상세 패널(상태 + 기술 버튼)을 담기 위해 창을 잠깐 확장할 크기(닫으면 WINDOW_SIZE로 원복).
 const DETAIL_WIDTH = 210;
 const DETAIL_HEIGHT = 320;
@@ -66,9 +71,13 @@ const SPECIES_KEYS = ['grass', 'fire', 'water', 'electric'];
 const DRIFT_STEP_BUSY = 6; // 프롬프트 처리중(달리기) — 크게 움직임
 const DRIFT_STEP_IDLE = 1; // 평상시 — 가끔 조금만 움직임
 const IDLE_MOVE_CHANCE = 0.15;
-// 첫 실행 시 몇 달치 세션 로그를 한꺼번에 XP로 소급 반영하지 않도록,
-// lastSessionTs가 없으면(0) "최근 24시간"만 소급 범위로 삼는다.
-const FIRST_RUN_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
+// 첫 실행 시 과거 세션 로그를 소급해 XP로 주지 않는다(0 = 앱을 켠 이후 활동만 인정).
+// 알을 "키우는" 연출이 성립하려면 설치 순간 XP가 들어오면 안 된다 — 소급이 살아 있으면
+// 부화 문턱(XP_RULES.hatchXp)을 아무리 올려도 하루치가 통째로 들어와 그냥 넘어간다.
+const FIRST_RUN_SESSION_WINDOW_MS = 0;
+// 앱을 켠 시각 기준으로 한 번만 계산한다(매 tick 재계산하면 floor가 현재로 계속 밀려
+// 어떤 이벤트도 잡히지 않는다 — sessionScanFloor 주석 참고).
+const FIRST_RUN_FLOOR = Date.now() - FIRST_RUN_SESSION_WINDOW_MS;
 const OFFSET_FILE = 'offset';
 
 // 16x16 포켓볼 스타일 트레이 아이콘(외부 에셋 없이 인라인 PNG로 제공).
@@ -123,6 +132,13 @@ function saveOffset(n) {
   } catch { /* 오프셋 영속 실패는 다음 tick에 재시도 — 치명적 아님 */ }
 }
 
+function compactEvents(file) {
+  const next = compactEventsFile(file, eventsOffset);
+  if (next === eventsOffset) return;
+  eventsOffset = next;
+  saveOffset(next);
+}
+
 function readEvents() {
   const file = join(dataDir(), EVENTS_FILE);
   if (!existsSync(file)) return [];
@@ -156,6 +172,7 @@ function readEvents() {
     if (!id || !kind) continue; // 필수 필드 없으면 스킵(개인용 — 서명 검증 없음)
     out.push({ id, kind, ts });
   }
+  compactEvents(file); // 소비분이 쌓였으면 앞부분을 잘라 파일 무한 증가를 막는다
   return out;
 }
 
@@ -190,7 +207,7 @@ function scanSessionRoot(root, floor, parser) {
 // 권위 토큰 소스: Claude Code(~/.claude/projects) + Codex(~/.codex/sessions) 세션 로그.
 // 두 소스의 ts는 모두 ISO(Date.parse)라 lastSessionTs 커서·일일 상한을 그대로 공유한다.
 function readSessionEvents(sinceTs) {
-  const floor = sinceTs > 0 ? sinceTs : Date.now() - FIRST_RUN_SESSION_WINDOW_MS;
+  const floor = sessionScanFloor(sinceTs, FIRST_RUN_FLOOR);
   return [
     ...scanSessionRoot(join(homedir(), '.claude', 'projects'), floor, parseSessionLines),
     ...scanSessionRoot(join(homedir(), '.codex', 'sessions'), floor, parseCodexLines),
@@ -860,7 +877,7 @@ function resolveBattleMove(payload) {
 }
 
 function runTick() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateKey(); // UTC가 아니라 로컬 자정 기준 — KST에서 오전 9시 리셋 방지
   const result = tick({ state, readEvents, readSessionEvents, today });
   state = result.state;
   saveState(dataDir(), state);
@@ -879,9 +896,9 @@ function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
   mainWindow = new BrowserWindow({
     width: WINDOW_SIZE,
-    height: WINDOW_SIZE,
+    height: WINDOW_HEIGHT,
     x: Math.floor(workArea.x + workArea.width / 2 - WINDOW_SIZE / 2),
-    y: workArea.y + workArea.height - WINDOW_SIZE - 24,
+    y: workArea.y + workArea.height - WINDOW_HEIGHT - 24,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -974,7 +991,7 @@ app.whenReady().then(() => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const [x, y] = mainWindow.getPosition();
     const w = open ? DETAIL_WIDTH : WINDOW_SIZE;
-    const h = open ? DETAIL_HEIGHT : WINDOW_SIZE;
+    const h = open ? DETAIL_HEIGHT : WINDOW_HEIGHT;
     mainWindow.setBounds({ x, y, width: w, height: h });
   });
 

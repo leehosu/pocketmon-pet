@@ -1,19 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { xpForLevel, levelForXp, applyEvents, XP_RULES } from '../src/core/xp-engine.js';
+import { xpForLevel, levelForXp, applyEvents, XP_RULES, LEVEL_XP_BASE } from '../src/core/xp-engine.js';
 
 const base = () => ({ species: 'electric', level: 1, xp: 0, stage: 0,
   dailyXp: 0, dailyDate: '2026-08-16', seenIds: [] });
 
 describe('xp curve', () => {
   it('xpForLevel grows super-linearly', () => {
-    expect(xpForLevel(1)).toBe(100);
-    expect(xpForLevel(4)).toBe(800);
-    expect(xpForLevel(9)).toBe(2700);
+    expect(xpForLevel(1)).toBe(LEVEL_XP_BASE);          // 231 × 1^1.5
+    expect(xpForLevel(4)).toBe(LEVEL_XP_BASE * 8);      // 231 × 4^1.5
+    expect(xpForLevel(9)).toBe(LEVEL_XP_BASE * 27);     // 231 × 9^1.5
   });
   it('levelForXp inverts the curve', () => {
     expect(levelForXp(0)).toBe(1);
-    expect(levelForXp(800)).toBe(4);
-    expect(levelForXp(2699)).toBe(8);
+    expect(levelForXp(xpForLevel(4))).toBe(4);
+    expect(levelForXp(xpForLevel(4) - 1)).toBe(3);      // 한 XP 모자라면 아직 이전 레벨
+    expect(levelForXp(xpForLevel(9) - 1)).toBe(8);
   });
 });
 
@@ -48,8 +49,10 @@ describe('applyEvents', () => {
   });
   it('levels up but does NOT auto-evolve (evolution is manual via "!")', () => {
     const s = { ...base(), xp: xpForLevel(9) }; // stage 0
+    // Lv.10에 정확히 닿는 만큼만 준다(곡선 계수가 바뀌어도 따라간다).
+    const needed = xpForLevel(10) - xpForLevel(9);
     const { state, changes } = applyEvents(s,
-      [{ id: 'big', kind: 'tokens', tokens: 462000, ts: 1 }], { today: '2026-08-16' });
+      [{ id: 'big', kind: 'tokens', tokens: needed * 1000, ts: 1 }], { today: '2026-08-16' });
     expect(state.level).toBe(10);        // 전기 진화 가능 레벨 도달
     expect(changes.leveledUp).toBe(true);
     expect(state.stage).toBe(0);         // 그러나 stage는 자동으로 오르지 않음(수동 진화)

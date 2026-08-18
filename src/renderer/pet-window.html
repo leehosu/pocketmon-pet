@@ -29,10 +29,12 @@
     50%{transform:translateY(-3px) scale(1.15);}
   }
   @media (prefers-reduced-motion: reduce){ #alert{animation:none;} }
+  /* HUD는 스프라이트(위쪽 96×96) 아래 전용 공간에 둔다.
+     bottom:0으로 붙이면 96×96 창 안에서 포켓몬 몸통과 겹쳐 읽기 어렵다. */
   #hud{
-    position:absolute;left:0;bottom:0;width:96px;
+    position:absolute;left:0;top:96px;width:96px;
     display:flex;flex-direction:column;align-items:center;gap:2px;
-    padding-bottom:2px;
+    padding-top:3px;
     opacity:0;transition:opacity .15s ease;
     -webkit-app-region:no-drag;
     pointer-events:none;
