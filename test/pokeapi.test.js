@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  dexLine, spriteUrl, cryUrl, pokemonUrl, pokemonSpeciesUrl, pokemonEncountersUrl, typeUrl, moveUrl,
-  moveValueForVersion, SPRITE_BASE, CRY_BASE, API_BASE,
+  dexLine, spriteUrl, backSpriteUrl, cryUrl, pokemonUrl, pokemonSpeciesUrl, pokemonEncountersUrl,
+  typeUrl, moveUrl, moveValueForVersion, SPRITE_BASE, BACK_SPRITE_BASE, CRY_BASE, API_BASE,
 } from '../src/core/pokeapi.js';
 
 describe('pokeapi', () => {
@@ -19,6 +19,7 @@ describe('pokeapi', () => {
 
   it('builds a PokeAPI sprites URL for a dex id', () => {
     expect(spriteUrl(25)).toBe(`${SPRITE_BASE}/25.png`);
+    expect(backSpriteUrl(25)).toBe(`${BACK_SPRITE_BASE}/25.png`);
     expect(SPRITE_BASE.startsWith('https://')).toBe(true);
   });
 

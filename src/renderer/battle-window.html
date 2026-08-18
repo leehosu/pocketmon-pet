@@ -4,29 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    /* 2세대(금/은) 배틀 화면 재현.
-       원작 게임보이 화면은 160×144다. 그 비율을 유지한 패널 하나를 화면 가운데 띄우고,
-       내부 좌표는 전부 그 160×144 기준의 백분율로 잡는다. 아래 주석의 (x,y,w,h)는
-       모두 원작 픽셀 좌표다. */
+    /* 2세대(금/은) 배틀 구성을 데스크톱용 컴팩트 창으로 재해석한다.
+       원작의 상대 좌상단·아군 우하단·하단 메뉴 구조는 유지하고,
+       내부 좌표는 창 크기에 반응하는 백분율로 잡는다. */
     :root{color-scheme:light}
     *{box-sizing:border-box}
     html,body{width:100%;height:100%;margin:0;background:transparent;overflow:hidden}
     body{
       display:flex;align-items:center;justify-content:center;
+      padding:12px;
       font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
       color:#181818;user-select:none;
-      background:rgba(6,8,12,.55); /* 전체화면 투명 창 위에 깔리는 암막 */
+      background:transparent;
     }
 
-    /* --- 게임보이 화면 --- */
+    /* AI-GENERATED: 데스크톱을 가리지 않는 컴팩트 플로팅 배틀 스테이지. */
     #screen{
       position:relative;
-      aspect-ratio:160/144;
-      height:min(92vh, 92vw * 144 / 160);
+      width:100%;height:100%;
       container-type:size;
       background:#f8f8f0;
       border:0.5cqh solid #101010;
-      box-shadow:0 0 0 0.4cqh #f8f8f0, 0 2.5cqh 6cqh rgba(0,0,0,.55);
+      border-radius:1.6cqh;
+      box-shadow:0 0 0 0.4cqh #f8f8f0, 0 1.8cqh 4cqh rgba(0,0,0,.45);
       overflow:hidden;
     }
     /* 내부 요소는 전부 이 폰트 크기 기준. 원작 글꼴은 화면 높이의 1/18 정도다. */
@@ -45,6 +45,8 @@
     #enemy{left:58%;top:2%;width:34%;height:34%}
     #player{left:5%;top:25%;width:38%;height:35%}
     .sprite{display:block;width:100%;height:100%;object-fit:contain;image-rendering:pixelated}
+    /* 후면 스프라이트가 아직 없을 때만 정면 이미지를 반전해 상대를 바라보게 한다. */
+    #screen.player-front-fallback #player .sprite{transform:scaleX(-1)}
 
     /* --- HP 박스 --- */
     /* 원작: 적 HP박스는 좌상단, 아군 HP박스는 우하단. 아군 쪽에만 수치가 붙는다. */
@@ -79,8 +81,10 @@
     #menu{position:absolute;left:0;right:0;top:66.7%;height:33.3%;display:none;
       background:#f8f8f0;border-top:0.4cqh solid #101010}
     #menu.open{display:flex}
-    #move-list{flex:1;padding:1.4cqh 1.4cqw;display:flex;flex-direction:column;gap:.9cqh;justify-content:center}
-    .move{display:flex;align-items:center;gap:.5em;padding:.2cqh .6cqw;border:0;background:transparent;
+    #move-list{flex:1;padding:1.4cqh 1.4cqw;display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));gap:.8cqh 1cqw;align-content:center}
+    .move{display:flex;align-items:center;gap:.5em;padding:.45cqh .6cqw;
+      border:0.25cqh solid #101010;background:#f8f8f0;
       color:#181818;font:700 .95em ui-monospace,SFMono-Regular,Menlo,monospace;text-align:left;cursor:pointer}
     .move::before{content:'▶';font-size:.8em;opacity:0}
     .move:hover:not(:disabled)::before,.move:focus-visible::before{opacity:1}
@@ -134,11 +138,11 @@
       25%{opacity:1;transform:translate(-50%,-4px) scale(1.08)}
       100%{opacity:0;transform:translate(-50%,-42px) scale(1)}}
 
-    /* --- 창 조작 버튼(화면 밖, 원작 illusion을 깨지 않도록 패널 바깥에 둔다) --- */
-    .chrome{position:fixed;z-index:9;top:2vh;width:4.4vh;height:4.4vh;border:1px solid rgba(255,255,255,.4);
-      border-radius:50%;background:rgba(8,10,14,.75);color:#fff;cursor:pointer;font:700 2vh/1 sans-serif}
-    #close{right:2vw}
-    #music{right:calc(2vw + 5.4vh)}
+    /* --- 창 조작 버튼 --- */
+    .chrome{position:fixed;z-index:9;top:17px;width:27px;height:27px;border:1px solid rgba(255,255,255,.4);
+      border-radius:50%;background:rgba(8,10,14,.78);color:#fff;cursor:pointer;font:700 15px/1 sans-serif}
+    #close{right:17px}
+    #music{right:50px}
     #music[aria-pressed="false"]{color:#8a929b;text-decoration:line-through}
 
     @media(prefers-reduced-motion:reduce){

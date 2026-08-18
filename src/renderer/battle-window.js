@@ -245,6 +245,7 @@ function playEnemyCry(payload) {
 function render(payload) {
   latest = payload;
   localLock = Boolean(payload.resolving);
+  root.classList.toggle('player-front-fallback', !payload.playerSpriteIsBack);
   renderCombatant('player', payload.battle.player);
   renderCombatant('enemy', payload.battle.enemy);
   drawSprite('player', payload.playerSprite);
