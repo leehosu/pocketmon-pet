@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from '
 import { join } from 'node:path';
 import { SAVE_FILE } from './paths.js';
 import { ROSTER, getSpeciesByKey, stageForLevel } from './roster.js';
-import { levelForXp } from './xp-engine.js';
+import { levelForXp, trimSeenIds } from './xp-engine.js';
 
 export function defaultState() {
   return {
@@ -22,7 +22,8 @@ function recompute(state) {
   const species = getSpeciesByKey(state.species);
   const maxStage = species ? stageForLevel(species, level) : 0;
   const stage = Math.max(0, Math.min(state.stage || 0, maxStage));
-  return { ...state, level, stage };
+  // seenIds도 여기서 함께 정규화 — 이미 커진 기존 세이브가 로드/저장 한 번으로 회복된다.
+  return { ...state, level, stage, seenIds: trimSeenIds(state.seenIds) };
 }
 
 export function loadState(dir) {

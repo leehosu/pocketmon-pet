@@ -6,6 +6,25 @@ export const XP_RULES = {
   hatchXp: 30, // 알이 부화 가능(느낌표) 상태가 되는 최소 누적 XP
 };
 
+// seenIds는 "이미 XP로 반영한 이벤트" 중복 방지용이다. 중복 차단은 이미 두 겹으로
+// 걸려 있고(hook은 ~/.pocketmon/offset, session 로그는 lastSessionTs 커서), seenIds는
+// 그 커서가 저장에 실패한 tick을 막는 마지막 그물이다. 즉 "최근 몇 tick" 범위만 필요한데
+// 무제한 누적하면 save.json이 영구히 커지고(토큰 이벤트는 어시스턴트 메시지마다 1건)
+// 매 tick 전체를 pretty-print로 다시 쓰게 된다. 최근 N개로 자른다.
+export const SEEN_ID_LIMIT = 2000;
+
+export function trimSeenIds(ids) {
+  if (!Array.isArray(ids)) return [];
+  return ids.length > SEEN_ID_LIMIT ? ids.slice(-SEEN_ID_LIMIT) : ids;
+}
+
+// 일일 상한(dailyCap)의 "하루"는 사용자가 체감하는 로컬 자정 기준이어야 한다.
+// toISOString()은 UTC라 KST(+9)에선 매일 오전 9시에 상한이 리셋된다.
+export function localDateKey(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 export function xpForLevel(level) {
   return Math.floor(100 * Math.pow(level, 1.5));
 }
@@ -45,6 +64,7 @@ export function applyEvents(state, events, opts) {
     if (e.kind === 'toolUse' || e.kind === 'sessionStart') reactions++;
   }
 
+  s.seenIds = trimSeenIds(s.seenIds);
   s.level = levelForXp(s.xp);
   // 진화는 자동이 아니라 사용자 클릭("!")으로만 일어난다. 여기서는 stage를 올리지 않고
   // 레벨이 허용하는 최대 단계로만 clamp(치팅으로 과도하게 올린 값 방어). 저장된 stage는 유지.

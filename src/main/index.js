@@ -10,16 +10,17 @@ import { randomUUID } from 'node:crypto';
 import https from 'node:https';
 
 import { dataDir, EVENTS_FILE } from '../core/paths.js';
+import { compactEventsFile } from '../core/events-log.js';
 import { loadState, saveState, rollStarter } from '../core/store.js';
 import { getSpeciesByKey, canEvolve } from '../core/roster.js';
 import { parseSessionLines, parseCodexLines } from '../core/session-parser.js';
-import { tick, ensureStarter } from './orchestrator.js';
+import { tick } from './orchestrator.js';
 import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
 import {
   dexLine, spriteUrl, cryUrl, pokemonUrl, moveUrl, moveValueForVersion,
 } from '../core/pokeapi.js';
 import { GEN2_EFFECTS, gen2SkillsForStage } from '../core/gsc-moves.js';
-import { applyBattleExperience } from '../core/xp-engine.js';
+import { applyBattleExperience, localDateKey } from '../core/xp-engine.js';
 import {
   createBattleProfile,
   ensureBattleProfile,
@@ -123,6 +124,13 @@ function saveOffset(n) {
   } catch { /* 오프셋 영속 실패는 다음 tick에 재시도 — 치명적 아님 */ }
 }
 
+function compactEvents(file) {
+  const next = compactEventsFile(file, eventsOffset);
+  if (next === eventsOffset) return;
+  eventsOffset = next;
+  saveOffset(next);
+}
+
 function readEvents() {
   const file = join(dataDir(), EVENTS_FILE);
   if (!existsSync(file)) return [];
@@ -156,6 +164,7 @@ function readEvents() {
     if (!id || !kind) continue; // 필수 필드 없으면 스킵(개인용 — 서명 검증 없음)
     out.push({ id, kind, ts });
   }
+  compactEvents(file); // 소비분이 쌓였으면 앞부분을 잘라 파일 무한 증가를 막는다
   return out;
 }
 
@@ -860,7 +869,7 @@ function resolveBattleMove(payload) {
 }
 
 function runTick() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateKey(); // UTC가 아니라 로컬 자정 기준 — KST에서 오전 9시 리셋 방지
   const result = tick({ state, readEvents, readSessionEvents, today });
   state = result.state;
   saveState(dataDir(), state);
