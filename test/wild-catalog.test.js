@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  chooseWildEncounter, goldSilverLevelMoveIds,
+  chooseGoldStoryEncounter, chooseWildEncounter, goldSilverLevelMoveIds,
 } from '../src/core/wild-catalog.js';
 
 describe('Gold wild catalog', () => {
@@ -39,5 +39,16 @@ describe('Gold wild catalog', () => {
       ],
     };
     expect(goldSilverLevelMoveIds(pokemon, 10)).toEqual([33, 98]);
+  });
+
+  it('uses original morning/night slots and moves to the Azalea chapter after the Wing Badge', () => {
+    const morning = chooseGoldStoryEncounter({ gymBadges: [] }, { period: 'morn', rng: () => 0 });
+    expect(morning).toEqual({ speciesId: 16, level: 2, mapId: 'ROUTE_29', period: 'morn', zone: 'violet' });
+
+    const night = chooseGoldStoryEncounter({ gymBadges: [] }, { period: 'nite', rng: () => 0 });
+    expect(night.speciesId).toBe(163);
+
+    const azalea = chooseGoldStoryEncounter({ gymBadges: ['zephyr'] }, { period: 'day', rng: () => 0 });
+    expect(azalea).toEqual({ speciesId: 69, level: 6, mapId: 'ROUTE_32', period: 'day', zone: 'azalea' });
   });
 });

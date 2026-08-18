@@ -4,6 +4,7 @@ import { SAVE_FILE } from './paths.js';
 import { ROSTER, getSpeciesByKey, stageForLevel } from './roster.js';
 import { levelForXp, trimSeenIds } from './xp-engine.js';
 import { normalizeGymBadges } from './gym-challenge.js';
+import { normalizeStoryProgress } from './azalea-story.js';
 
 export function defaultState() {
   return {
@@ -13,6 +14,7 @@ export function defaultState() {
     hatched: false, // 최초엔 알 상태. 부화("!" 클릭) 시에만 종이 랜덤 결정된다.
     battleProfile: null,
     gymBadges: [],
+    storyProgress: normalizeStoryProgress(),
   };
 }
 
@@ -31,6 +33,7 @@ function recompute(state) {
     stage,
     seenIds: trimSeenIds(state.seenIds),
     gymBadges: normalizeGymBadges(state.gymBadges),
+    storyProgress: normalizeStoryProgress(state.storyProgress),
   };
 }
 

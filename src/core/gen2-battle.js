@@ -56,6 +56,14 @@ const SUPPORTED_WILD_DAMAGE_EFFECTS = new Set([
   'EFFECT_SP_DEF_DOWN_HIT',
   'EFFECT_ACCURACY_DOWN_HIT',
   'EFFECT_GUST',
+  'EFFECT_POISON_HIT',
+  'EFFECT_FURY_CUTTER',
+]);
+
+const SUPPORTED_WILD_STATUS_EFFECTS = new Set([
+  'EFFECT_DEFENSE_DOWN',
+  'EFFECT_SPEED_DOWN',
+  'EFFECT_DEFENSE_UP',
 ]);
 
 function randomByte(rng) {
@@ -95,6 +103,7 @@ function createCombatant(input) {
     flinched: false,
     chargingMove: null,
     lightScreenTurns: 0,
+    furyCutterCount: 0,
     stages: { ...STAGE_TEMPLATE },
   };
 }
@@ -110,7 +119,10 @@ export function createGen2Battle({ player, enemy }) {
 
 export function isSupportedWildMove(moveOrId) {
   const move = moveFrom(moveOrId);
-  return Boolean(move && move.power > 0 && SUPPORTED_WILD_DAMAGE_EFFECTS.has(move.effect));
+  return Boolean(move && (
+    (move.power > 0 && SUPPORTED_WILD_DAMAGE_EFFECTS.has(move.effect))
+    || (move.power === 0 && SUPPORTED_WILD_STATUS_EFFECTS.has(move.effect))
+  ));
 }
 
 function movePriority(move) {
@@ -298,6 +310,8 @@ function applyDamageSecondary(state, actorKey, targetKey, move, damage, targetMo
     applyMajorStatus(target, targetKey, 'burn', events);
   } else if (chance && move.effect === 'EFFECT_FREEZE_HIT') {
     applyMajorStatus(target, targetKey, 'freeze', events);
+  } else if (chance && move.effect === 'EFFECT_POISON_HIT') {
+    applyMajorStatus(target, targetKey, 'poison', events);
   } else if (chance && ['EFFECT_FLINCH_HIT', 'EFFECT_STOMP'].includes(move.effect) && !targetMoved) {
     target.flinched = true;
     events.push({ kind: 'volatile', target: targetKey, status: 'flinch' });
@@ -328,7 +342,7 @@ function applyDamageSecondary(state, actorKey, targetKey, move, damage, targetMo
 }
 
 function targetMoveHasEffect(move, target) {
-  if (move.effect === 'EFFECT_SYNTHESIS' || move.effect === 'EFFECT_LIGHT_SCREEN') return true;
+  if (['EFFECT_SYNTHESIS', 'EFFECT_LIGHT_SCREEN', 'EFFECT_DEFENSE_UP'].includes(move.effect)) return true;
   return typeEffectiveness(move.type, target.types) !== 0;
 }
 
@@ -362,6 +376,15 @@ function statusMove(state, actorKey, targetKey, move, rng, events) {
     case 'EFFECT_SPEED_DOWN_2':
       changeStage(target, 'speed', -2, events, targetKey);
       break;
+    case 'EFFECT_SPEED_DOWN':
+      changeStage(target, 'speed', -1, events, targetKey);
+      break;
+    case 'EFFECT_DEFENSE_DOWN':
+      changeStage(target, 'defense', -1, events, targetKey);
+      break;
+    case 'EFFECT_DEFENSE_UP':
+      changeStage(actor, 'defense', 1, events, actorKey);
+      break;
     case 'EFFECT_CONFUSE':
       applyConfusion(target, targetKey, rng, events);
       break;
@@ -378,6 +401,7 @@ function executeAction(state, action, moved, rng, events) {
   const target = state[action.target];
   const move = action.move;
   if (!canAct(state, action.actor, move, rng, events) || state.winner) return;
+  if (move.effect !== 'EFFECT_FURY_CUTTER') actor.furyCutterCount = 0;
   pushMoveEvent(events, action.actor, move);
 
   if (move.effect === 'EFFECT_SOLARBEAM' && actor.chargingMove !== (move.slug || move.id)) {
@@ -395,12 +419,19 @@ function executeAction(state, action, moved, rng, events) {
     alwaysHits: move.effect === 'EFFECT_ALWAYS_HIT',
   });
   if (!hit) {
+    actor.furyCutterCount = 0;
     events.push({ kind: 'miss', actor: action.actor, target: action.target });
     return;
   }
 
   if (move.power > 0) {
-    const damage = damageMove(state, action.actor, action.target, move, rng, events);
+    const effectiveMove = move.effect === 'EFFECT_FURY_CUTTER'
+      ? { ...move, power: Math.min(160, move.power * (2 ** actor.furyCutterCount)) }
+      : move;
+    const damage = damageMove(state, action.actor, action.target, effectiveMove, rng, events);
+    if (move.effect === 'EFFECT_FURY_CUTTER' && damage.amount > 0) {
+      actor.furyCutterCount = Math.min(4, actor.furyCutterCount + 1);
+    }
     applyDamageSecondary(state, action.actor, action.target, move, damage, moved.has(action.target), rng, events);
     checkFaint(state, action.target, events);
     if (!state.winner) checkFaint(state, action.actor, events);

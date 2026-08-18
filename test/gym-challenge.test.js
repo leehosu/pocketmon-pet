@@ -4,6 +4,7 @@ import {
   FALKNER_MAX_APPEAR_DELAY_MS,
   FALKNER_MIN_APPEAR_DELAY_MS,
   awardZephyrBadge,
+  awardHiveBadge,
   canChallengeFalkner,
   falknerAppearanceDelayMs,
   normalizeGymBadges,
@@ -27,6 +28,7 @@ describe('Falkner gym challenge', () => {
     const won = awardZephyrBadge({ gymBadges: [] });
     expect(won.gymBadges).toEqual(['zephyr']);
     expect(canChallengeFalkner({ hatched: true, level: 7, battleProfile: { wins: 10 }, ...won })).toBe(false);
+    expect(awardHiveBadge(won).gymBadges).toEqual(['zephyr', 'hive']);
   });
 
   it('delays the first gym appearance by two to five minutes', () => {
