@@ -24,6 +24,10 @@
     box-shadow:0 0 6px #f8c838;
     animation:alertpulse .8s ease-in-out infinite;
   }
+  #badges{position:absolute;left:3px;top:3px;display:flex;gap:3px;pointer-events:none}
+  .zephyr-badge{width:18px;height:15px;display:flex;align-items:center;justify-content:center;
+    background:#dfeafa;color:#36558c;border:2px solid #17202a;clip-path:polygon(0 30%,32% 30%,50% 0,68% 30%,100% 30%,78% 100%,22% 100%);
+    font:bold 9px monospace;filter:drop-shadow(1px 2px 0 rgba(0,0,0,.35))}
   @keyframes alertpulse{
     0%,100%{transform:translateY(0) scale(1);}
     50%{transform:translateY(-3px) scale(1.15);}
@@ -78,6 +82,7 @@
   <canvas id="pet" width="96" height="96"></canvas>
   <div id="pop"></div>
   <div id="alert" title="">!</div>
+  <div id="badges" aria-label="획득한 배지"></div>
   <div id="hud">
     <div id="xp-bar"><div id="xp-fill"></div></div>
     <div id="status"></div>

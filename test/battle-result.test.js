@@ -19,6 +19,13 @@ describe('battle result view', () => {
       .toMatchObject({ won: false, title: '패배', xpText: '+0 XP', detail: '획득 XP 0 · 포켓몬은 회복했습니다' });
   });
 
+  it('shows the earned gym badge in the original-style result line', () => {
+    expect(battleResultView({
+      battle: { winner: 'player' }, reward: 222, level: 10, totalXp: 1_000,
+      resultChanges: { badgeEarned: '윙배지' },
+    })).toMatchObject({ detail: '윙배지를 손에 넣었다! · Lv.10' });
+  });
+
   it('returns no view while the battle is active', () => {
     expect(battleResultView({ battle: { winner: null } })).toBe(null);
   });

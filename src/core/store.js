@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { SAVE_FILE } from './paths.js';
 import { ROSTER, getSpeciesByKey, stageForLevel } from './roster.js';
 import { levelForXp, trimSeenIds } from './xp-engine.js';
+import { normalizeGymBadges } from './gym-challenge.js';
 
 export function defaultState() {
   return {
@@ -11,6 +12,7 @@ export function defaultState() {
     locked: false, rolledAt: null, lastActiveAt: null, lastSessionTs: 0,
     hatched: false, // 최초엔 알 상태. 부화("!" 클릭) 시에만 종이 랜덤 결정된다.
     battleProfile: null,
+    gymBadges: [],
   };
 }
 
@@ -23,7 +25,13 @@ function recompute(state) {
   const maxStage = species ? stageForLevel(species, level) : 0;
   const stage = Math.max(0, Math.min(state.stage || 0, maxStage));
   // seenIds도 여기서 함께 정규화 — 이미 커진 기존 세이브가 로드/저장 한 번으로 회복된다.
-  return { ...state, level, stage, seenIds: trimSeenIds(state.seenIds) };
+  return {
+    ...state,
+    level,
+    stage,
+    seenIds: trimSeenIds(state.seenIds),
+    gymBadges: normalizeGymBadges(state.gymBadges),
+  };
 }
 
 export function loadState(dir) {

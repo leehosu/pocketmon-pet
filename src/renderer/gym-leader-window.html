@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>비상의 도전</title>
+  <style>
+    *{box-sizing:border-box}
+    html,body{width:100%;height:100%;margin:0;background:transparent;overflow:hidden}
+    body{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;user-select:none;-webkit-app-region:drag}
+    #stage{position:relative;width:100%;height:100%;filter:drop-shadow(0 7px 3px rgba(0,0,0,.32))}
+    #leader{position:absolute;right:2px;bottom:6px;width:112px;height:112px;image-rendering:pixelated;
+      animation:arrive .55s steps(6,end) both}
+    #shadow{position:absolute;right:12px;bottom:2px;width:76px;height:13px;border-radius:50%;background:rgba(12,21,27,.32)}
+    #bubble{position:absolute;left:6px;top:8px;width:194px;min-height:142px;padding:12px 12px 9px;
+      border:4px solid #17202a;background:#f8f6df;color:#17202a;box-shadow:inset 0 0 0 3px #aab18b}
+    #bubble::after{content:'';position:absolute;right:-19px;bottom:26px;width:24px;height:24px;
+      background:#f8f6df;border-right:4px solid #17202a;border-bottom:4px solid #17202a;transform:rotate(-45deg)}
+    #role{font-size:8px;font-weight:900;color:#65718a;letter-spacing:.08em}
+    #name{margin-top:1px;font-size:16px;font-weight:1000;color:#36558c}
+    #line{position:relative;z-index:1;margin:7px 0 8px;min-height:31px;font-size:10px;line-height:1.45;font-weight:800;word-break:keep-all}
+    #challenge{position:relative;z-index:2;width:100%;padding:6px 7px;border:3px solid #17202a;background:#f8c840;
+      color:#17202a;font:900 10px ui-monospace,SFMono-Regular,Menlo,monospace;text-align:left;cursor:pointer;
+      -webkit-app-region:no-drag}
+    #challenge::before{content:'▶';margin-right:6px}
+    #challenge:disabled{background:#c7c5aa;color:#68706b;cursor:default}
+    #close{position:absolute;z-index:3;right:7px;top:7px;width:24px;height:24px;padding:0;border:3px solid #17202a;
+      background:#f8f6df;color:#17202a;font:1000 14px/1 ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;
+      -webkit-app-region:no-drag}
+    #time{position:absolute;left:11px;right:11px;bottom:6px;height:3px;background:#b9b99c}
+    #time>span{display:block;width:100%;height:100%;background:#4c688e;transform-origin:left}
+    @keyframes arrive{from{transform:translateX(105px)}to{transform:translateX(0)}}
+    @media(prefers-reduced-motion:reduce){#leader{animation:none}}
+  </style>
+</head>
+<body>
+  <main id="stage">
+    <div id="shadow"></div>
+    <canvas id="leader" width="112" height="112" aria-label="도라지시티 체육관 관장 비상"></canvas>
+    <section id="bubble">
+      <div id="role">도라지시티 체육관 관장</div>
+      <button id="close" type="button" aria-label="비상 돌려보내기">×</button>
+      <div id="name">비상</div>
+      <div id="line">새처럼 우아한 비행포켓몬의 힘, 받아낼 수 있겠어?</div>
+      <button id="challenge" type="button">승부를 받아들인다</button>
+      <div id="time"><span></span></div>
+    </section>
+  </main>
+  <script type="module" src="./gym-leader-window.js"></script>
+</body>
+</html>

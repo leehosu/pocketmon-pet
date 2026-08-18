@@ -3,225 +3,178 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>포켓몬 배틀</title>
   <style>
-    /* 2세대(금/은) 배틀 구성을 데스크톱용 컴팩트 창으로 재해석한다.
-       원작의 상대 좌상단·아군 우하단·하단 메뉴 구조는 유지하고,
-       내부 좌표는 창 크기에 반응하는 백분율로 잡는다. */
-    :root{color-scheme:light}
+    :root{
+      color-scheme:light;
+      --paper:#f8f8f0;
+      --ink:#101010;
+      --unit:3px;
+      --balls:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAIAgAAAAD3XrrSAAAAOklEQVR42mP4DwUMf/j/8J+N+bee4WPwB+ZPi3//ZjgWcoDhRuf7fwxHgYxbmkDGqRVQkU+LoWpgugCY/S0XiR35eAAAAABJRU5ErkJggg==');
+    }
     *{box-sizing:border-box}
     html,body{width:100%;height:100%;margin:0;background:transparent;overflow:hidden}
-    body{
-      display:flex;align-items:center;justify-content:center;
-      padding:12px;
-      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-      color:#181818;user-select:none;
-      background:transparent;
-      -webkit-app-region:drag;
-    }
-    button,#menu{-webkit-app-region:no-drag}
+    body{display:flex;align-items:center;justify-content:center;color:var(--ink);user-select:none;
+      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;-webkit-app-region:drag}
+    button{font:inherit;-webkit-app-region:no-drag}
 
-    /* AI-GENERATED: 데스크톱을 가리지 않는 컴팩트 플로팅 배틀 스테이지. */
-    #screen{
-      position:relative;
-      width:100%;height:100%;
-      container-type:size;
-      background:#f8f8f0;
-      border:0.5cqh solid #101010;
-      border-radius:1.6cqh;
-      box-shadow:0 0 0 0.4cqh #f8f8f0, 0 1.8cqh 4cqh rgba(0,0,0,.45);
-      overflow:hidden;
-    }
-    /* 내부 요소는 전부 이 폰트 크기 기준. 원작 글꼴은 화면 높이의 1/18 정도다. */
-    #screen{font-size:4.1cqh}
+    /* AI-GENERATED: pret/pokegold의 20×18 타일(160×144) 좌표를 정확히 3배로 표시한다. */
+    #screen{position:relative;width:480px;height:432px;overflow:hidden;background:var(--paper);
+      box-shadow:0 0 0 3px var(--ink),0 8px 0 rgba(0,0,0,.35);image-rendering:pixelated}
+    #battlefield{position:absolute;inset:0 0 144px;background:var(--paper)}
 
-    /* --- 배경: 위쪽 하늘, 아래쪽 지면 --- */
-    .bg{position:absolute;inset:0}
-    .bg .sky{position:absolute;left:0;right:0;top:0;height:66.7%;background:#f8f8f0}
-    /* 원작의 발판(타원). 적은 위 오른쪽, 아군은 아래 왼쪽. */
-    .platform{position:absolute;border-radius:50%;background:#d8e8c0;border:0.35cqh solid #101010}
-    #enemy-platform{left:54%;top:34%;width:42%;height:8%}
-    #player-platform{left:3%;top:55%;width:42%;height:10%}
-
-    /* --- 포켓몬 --- */
-    .combatant{position:absolute}
-    #enemy{left:58%;top:2%;width:34%;height:34%}
-    #player{left:5%;top:25%;width:38%;height:35%}
-    .sprite{display:block;width:100%;height:100%;object-fit:contain;image-rendering:pixelated}
-    /* 후면 스프라이트가 아직 없을 때만 정면 이미지를 반전해 상대를 바라보게 한다. */
+    .combatant{position:absolute;width:168px;height:168px}
+    #enemy{left:288px;top:0}
+    #player{left:24px;top:120px}
+    .sprite{display:block;width:100%;height:100%;image-rendering:pixelated}
     #screen.player-front-fallback #player .sprite{transform:scaleX(-1)}
-    #enemy.hit{animation:enemy-hit .4s steps(3,end)}
-    #player.hit{animation:player-hit .4s steps(3,end)}
-    .combatant.hit .sprite{animation:hit-flash .4s steps(2,end)}
-    @keyframes enemy-hit{25%{transform:translate(5%,-1%)}50%{transform:translate(-3%,1%)}75%{transform:translate(2%,0)}}
-    @keyframes player-hit{25%{transform:translate(-5%,1%)}50%{transform:translate(3%,-1%)}75%{transform:translate(-2%,0)}}
-    @keyframes hit-flash{50%{filter:brightness(3) contrast(1.4);opacity:.35}}
+    #enemy.hit{animation:enemy-hit .36s steps(3,end)}
+    #player.hit{animation:player-hit .36s steps(3,end)}
+    .combatant.hit .sprite{animation:hit-flash .36s steps(2,end)}
+    @keyframes enemy-hit{33%{transform:translateX(12px)}66%{transform:translateX(-9px)}}
+    @keyframes player-hit{33%{transform:translateX(-12px)}66%{transform:translateX(9px)}}
+    @keyframes hit-flash{50%{opacity:0}}
 
-    /* --- HP 박스 --- */
-    /* 원작: 적 HP박스는 좌상단, 아군 HP박스는 우하단. 아군 쪽에만 수치가 붙는다. */
-    .hpbox{position:absolute;background:#f8f8f0;border:0.4cqh solid #101010;
-      padding:0.5cqh 0.8cqw;line-height:1.15}
-    /* 아군 박스는 하단 텍스트 박스(66.7%) 위에 반드시 들어가야 한다 — HP 수치가 잘리면 안 된다. */
-    #enemy-box{left:3%;top:9%;width:48%}
-    #player-box{left:49%;top:46%;width:48%}
-    .hpbox .name{font-size:.86em;font-weight:700;letter-spacing:-.02em;
-      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .hpbox .row{display:flex;align-items:center;justify-content:space-between;gap:.4em;font-size:.72em;font-weight:700}
-    .hpbox .level{font-variant-numeric:tabular-nums}
-    /* HP 게이지: 검은 테두리 안에 48칸짜리 막대 */
-    .gauge{display:flex;align-items:center;gap:.35em;margin-top:.25cqh}
-    .gauge .tag{font-size:.6em;font-weight:900;letter-spacing:.04em}
-    .bar{position:relative;flex:1;height:1.5cqh;background:#f8f8f0;border:0.3cqh solid #101010}
-    .bar>span{display:block;height:100%;width:100%;background:#48c04c;transition:width .32s steps(8,end)}
-    .bar>span[data-tone="mid"]{background:#f0c020}
-    .bar>span[data-tone="low"]{background:#e04038}
-    .hpnum{margin-top:.2cqh;text-align:right;font-size:.68em;font-weight:700;font-variant-numeric:tabular-nums}
-    #enemy-box .hpnum{display:none} /* 원작에서 적 HP 수치는 보이지 않는다 */
-    .hpbox.hp-change{animation:hp-change .4s steps(2,end)}
-    @keyframes hp-change{50%{filter:brightness(1.6);transform:translateY(-.35cqh)}}
+    /* 원본 HUD 좌표: 적 (1,0), 아군 (10,7), HP 바 (2,2)/(10,9). */
+    .hpbox{position:absolute;z-index:2;background:transparent;font-size:21px;line-height:24px;font-weight:900}
+    #enemy-box{left:24px;top:0;width:240px;height:96px}
+    #player-box{left:240px;top:168px;width:240px;height:120px}
+    .hpbox .name{position:absolute;left:0;top:0;max-width:198px;white-space:nowrap;overflow:hidden;text-overflow:clip}
+    .hpbox .row{position:absolute;top:24px;font-size:18px;line-height:24px}
+    #enemy-box .row{left:120px}#player-box .row{left:96px}
+    .gauge{position:absolute;display:flex;align-items:center;height:24px}
+    #enemy-box .gauge{left:24px;top:48px;width:192px}
+    #player-box .gauge{left:0;top:48px;width:216px}
+    .gauge .tag{width:48px;font-size:15px;letter-spacing:-1px}
+    .bar{position:relative;flex:1;height:12px;border:3px solid var(--ink);background:var(--paper)}
+    .bar>span{display:block;height:100%;width:100%;background:#48b84c;transition:width .3s steps(8,end)}
+    .bar>span[data-tone="mid"]{background:#e8bc28}.bar>span[data-tone="low"]{background:#d84838}
+    .hpnum{position:absolute;right:24px;top:72px;font-size:18px;line-height:24px;font-variant-numeric:tabular-nums}
+    #enemy-box .hpnum{display:none}
+    #player-box::after{content:'';position:absolute;right:0;bottom:20px;width:216px;height:72px;
+      border-right:6px solid var(--ink);border-bottom:6px solid var(--ink);pointer-events:none}
+    #enemy-box::after{content:'';position:absolute;left:0;top:48px;width:216px;height:36px;
+      border-left:6px solid var(--ink);border-bottom:6px solid var(--ink);pointer-events:none}
+    #expbar{position:absolute;right:0;top:102px;width:216px;height:6px;background:#d2a72e;border:0}
+    .hpbox.hp-change{animation:hp-change .35s steps(2,end)}
+    @keyframes hp-change{50%{opacity:.3}}
 
-    /* --- 하단 텍스트 박스 --- */
-    #textbox{position:absolute;left:0;right:0;top:66.7%;height:33.3%;
-      background:#f8f8f0;border-top:0.4cqh solid #101010;padding:1.6cqh 2cqw;
-      font-size:.95em;font-weight:700;line-height:1.45}
+    #trainer-party{position:absolute;z-index:4;right:24px;top:24px;display:flex;flex-direction:row-reverse;gap:3px}
+    #trainer-party[hidden]{display:none}
+    /* pret/pokegold gfx/battle/balls.png 원본 타일. */
+    .party-ball{width:24px;height:24px;background:var(--balls) 0 0/96px 24px no-repeat;image-rendering:pixelated}
+    .party-ball.active{background-position:-24px 0}.party-ball.defeated{background-position:-48px 0}
+
+    /* 원작 타일맵처럼 2px 선을 3배 정수 배율로 표시한다. 작은 타일 이미지를 늘리지 않는다. */
+    .frame{background:var(--paper);border:6px solid var(--ink);box-shadow:inset 0 0 0 3px var(--paper)}
+    #textbox{position:absolute;z-index:5;left:0;top:288px;width:480px;height:144px;padding:12px 15px;
+      font-size:21px;line-height:30px;font-weight:900}
     #textbox.hidden{display:none}
-    #cursor{position:absolute;right:2.5cqw;bottom:1.4cqh;font-size:.8em;animation:blink 1s steps(1,end) infinite}
+    #cursor{position:absolute;right:18px;bottom:12px;font-size:18px;animation:blink .8s steps(1,end) infinite}
     @keyframes blink{50%{opacity:0}}
 
-    /* --- 기술 선택 메뉴(원작에서 텍스트 박스를 대체) --- */
-    #menu{position:absolute;left:0;right:0;top:66.7%;height:33.3%;display:none;
-      background:#f8f8f0;border-top:0.4cqh solid #101010}
-    #menu.open{display:flex}
-    #move-list{flex:1;padding:1.4cqh 1.4cqw;display:grid;
-      grid-template-columns:repeat(2,minmax(0,1fr));gap:.8cqh 1cqw;align-content:center}
-    .move{display:flex;align-items:center;gap:.5em;padding:.45cqh .6cqw;
-      border:0.25cqh solid #101010;background:#f8f8f0;
-      color:#181818;font:700 .95em ui-monospace,SFMono-Regular,Menlo,monospace;text-align:left;cursor:pointer}
-    .move::before{content:'▶';font-size:.8em;opacity:0}
-    .move:hover:not(:disabled)::before,.move:focus-visible::before{opacity:1}
-    .move:disabled{opacity:.4;cursor:default}
-    /* 오른쪽 정보 칸: 선택 중인 기술의 타입과 PP */
-    #move-info{width:38%;border-left:0.4cqh solid #101010;padding:1.4cqh 1.4cqw;
-      display:flex;flex-direction:column;justify-content:center;gap:.5cqh;font-size:.78em;font-weight:700}
-    #move-info .kv{display:flex;justify-content:space-between;gap:.4em;font-variant-numeric:tabular-nums}
-    #run{margin-top:.45cqh;padding:.4cqh .55cqw;border:.25cqh solid #101010;background:#f8f8f0;
-      color:#181818;font:700 1em ui-monospace,SFMono-Regular,Menlo,monospace;text-align:left;cursor:pointer}
-    #run::before{content:'▶';margin-right:.45em;opacity:0}
-    #run:hover:not(:disabled)::before,#run:focus-visible::before{opacity:1}
-    #run:disabled{opacity:.4;cursor:default}
+    /* 원본 BattleMenuHeader: menu_coords 8,12,19,17 / 2행×2열. */
+    #command-menu{position:absolute;z-index:5;inset:288px 0 0;display:none;background:var(--paper)}
+    #command-menu.open{display:block}
+    #command-prompt{position:absolute;left:0;top:0;width:216px;height:144px;padding:30px 18px;
+      font-size:18px;line-height:27px;font-weight:900;white-space:pre-line}
+    #command-list{position:absolute;left:192px;top:0;width:288px;height:144px;padding:12px 9px;
+      display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;align-items:center}
+    .command{position:relative;border:0;background:transparent;color:var(--ink);font-size:20px;font-weight:900;text-align:left;padding-left:30px;cursor:pointer}
+    .command::before{content:'▶';position:absolute;left:6px;opacity:0}
+    .command:hover::before,.command:focus-visible::before{opacity:1}
 
-    /* --- 배틀 시작 연출 --- */
-    /* 원작은 전투에 들어갈 때 화면이 몇 번 번쩍인 뒤 가로 블라인드가 열리고,
-       포켓몬이 양옆에서 미끄러져 들어온다. 그 순서를 그대로 따라간다. */
-    #transition{position:absolute;inset:0;z-index:8;pointer-events:none;display:none}
+    /* 원본 MoveSelectionScreen: 기술창 (4,12), 정보창 (0,8). */
+    #menu{position:absolute;z-index:6;inset:0;display:none;pointer-events:none}
+    #menu.open{display:block}
+    #move-info{position:absolute;left:0;top:192px;width:264px;height:120px;padding:9px 12px;
+      font-size:16px;line-height:24px;font-weight:900;pointer-events:auto}
+    #move-info .kv{display:flex;justify-content:space-between}.power-row{display:none!important}
+    #move-list{position:absolute;left:96px;top:288px;width:384px;height:144px;padding:10px 15px;
+      display:grid;grid-template-columns:1fr;grid-template-rows:repeat(4,24px);align-content:center;pointer-events:auto}
+    .move{position:relative;width:100%;height:24px;padding:0 0 0 27px;border:0;background:transparent;color:var(--ink);
+      font-size:18px;line-height:24px;font-weight:900;text-align:left;cursor:pointer}
+    .move::before{content:'▶';position:absolute;left:3px;opacity:0}
+    .move:hover::before,.move:focus-visible::before{opacity:1}
+    .move:disabled{opacity:.4;cursor:default}
+
+    #transition{position:absolute;inset:0;z-index:20;pointer-events:none;display:none}
     #screen.intro #transition{display:block}
     #transition .flash{position:absolute;inset:0;animation:flash .45s steps(1,end) forwards}
-    @keyframes flash{
-      0%,15%   {background:#101010;opacity:1}
-      15.1%,32%{background:#f8f8f0;opacity:1}
-      32.1%,49%{background:#101010;opacity:1}
-      49.1%,66%{background:#f8f8f0;opacity:1}
-      66.1%,83%{background:#101010;opacity:1}
-      83.1%,100%{background:#101010;opacity:0}
-    }
+    @keyframes flash{0%,15%,32.1%,49%,66.1%{background:#101010;opacity:1}15.1%,32%,49.1%,66%{background:#f8f8f0;opacity:1}83.1%,100%{opacity:0}}
     #transition .blinds{position:absolute;inset:0;display:flex;flex-direction:column}
-    #transition .blinds i{flex:1;background:#101010;transform-origin:left;
-      animation:blind .45s ease-in .45s forwards}
+    #transition .blinds i{flex:1;background:#101010;transform-origin:left;animation:blind .45s steps(6,end) .45s forwards}
     #transition .blinds i:nth-child(even){transform-origin:right}
     @keyframes blind{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+    #screen.intro #enemy{animation:slide-in-right .45s steps(6,end) .9s both}
+    #screen.intro #player{animation:slide-in-left .45s steps(6,end) .9s both}
+    #screen.trainer-intro :is(#enemy-box,#player-box){visibility:hidden}
+    #screen.opponent-switch #enemy{animation:slide-in-right .45s steps(6,end) both}
+    @keyframes slide-in-right{from{transform:translateX(192px)}to{transform:translateX(0)}}
+    @keyframes slide-in-left{from{transform:translateX(-192px)}to{transform:translateX(0)}}
 
-    /* 포켓몬과 HP박스가 양옆에서 들어온다(블라인드가 열린 뒤). */
-    #screen.intro #enemy,#screen.intro #enemy-box{animation:slide-in-right .45s ease-out .9s both}
-    #screen.intro #player,#screen.intro #player-box{animation:slide-in-left .45s ease-out .9s both}
-    @keyframes slide-in-right{from{transform:translateX(150%)}to{transform:translateX(0)}}
-    @keyframes slide-in-left{from{transform:translateX(-170%)}to{transform:translateX(0)}}
-
-    /* --- 결과 패널 --- */
-    #result{position:absolute;z-index:7;left:50%;top:50%;transform:translate(-50%,-50%);
-      width:74%;padding:2.6cqh 2.4cqw;background:#f8f8f0;border:0.5cqh solid #101010;
-      text-align:center;box-shadow:0 1cqh 0 rgba(0,0,0,.35)}
+    #result{position:absolute;z-index:15;left:0;top:288px;width:480px;height:144px;padding:12px 15px;text-align:left}
     #result[hidden]{display:none}
-    #result-title{font-size:1.35em;font-weight:900}
-    #result-xp{margin-top:.5cqh;color:#b06000;font-size:1.6em;font-weight:900}
-    #result-detail{margin-top:.5cqh;font-size:.78em;font-weight:700}
+    #result-title{font-size:21px;line-height:27px;font-weight:900}
+    #result-xp{font-size:18px;line-height:24px;font-weight:900}
+    #result-detail{font-size:15px;line-height:21px;font-weight:900}
 
-    /* --- 데미지 숫자 --- */
-    .damage{position:absolute;z-index:6;color:#f8f8f0;font-size:1.3em;font-weight:900;
-      -webkit-text-stroke:0.35cqh #101010;paint-order:stroke fill;
-      animation:float .9s ease-out forwards;pointer-events:none}
-    .damage.good{color:#ffd83d}.damage.heal{color:#7ce88f}
-    @keyframes float{0%{opacity:0;transform:translate(-50%,8px) scale(.8)}
-      25%{opacity:1;transform:translate(-50%,-4px) scale(1.08)}
-      100%{opacity:0;transform:translate(-50%,-42px) scale(1)}}
-
-    /* --- 창 조작 버튼 --- */
-    .chrome{position:fixed;z-index:9;top:17px;width:27px;height:27px;border:1px solid rgba(255,255,255,.4);
-      border-radius:50%;background:rgba(8,10,14,.78);color:#fff;cursor:pointer;font:700 15px/1 sans-serif}
-    #close{right:17px}
-    #music{right:50px}
-    #music[aria-pressed="false"]{color:#8a929b;text-decoration:line-through}
-
+    .damage{display:none}
+    .chrome{display:none}
     @media(prefers-reduced-motion:reduce){
-      .damage,.combatant.hit,.combatant.hit .sprite,.hpbox.hp-change{animation:none}
-      .bar>span{transition:none}#cursor{animation:none}
-      /* 연출을 끄되 진행은 막지 않는다 — 시작 시퀀스 타이밍은 JS가 따로 잡는다. */
-      #screen.intro #transition{display:none}
-      #screen.intro #enemy,#screen.intro #enemy-box,
-      #screen.intro #player,#screen.intro #player-box{animation:none}
+      .combatant.hit,.combatant.hit .sprite,.hpbox.hp-change,#cursor{animation:none}
+      .bar>span{transition:none}#screen.intro #transition{display:none}
+      #screen.intro #enemy,#screen.intro #player{animation:none}
     }
   </style>
 </head>
 <body>
-  <button id="music" class="chrome" type="button" title="배틀 음악 끄기" aria-label="배틀 음악 끄기" aria-pressed="true">♪</button>
-  <button id="close" class="chrome" type="button" title="전투에서 나가기" aria-label="전투에서 나가기">×</button>
+  <button id="music" class="chrome" type="button" aria-pressed="true">♪</button>
+  <button id="close" class="chrome" type="button">×</button>
 
   <main id="screen">
-    <div class="bg">
-      <div class="sky"></div>
-      <div id="enemy-platform" class="platform"></div>
-      <div id="player-platform" class="platform"></div>
-    </div>
+    <section id="battlefield">
+      <section id="enemy" class="combatant"><canvas class="sprite" width="56" height="56"></canvas></section>
+      <section id="player" class="combatant"><canvas class="sprite" width="56" height="56"></canvas></section>
 
-    <section id="enemy" class="combatant"><canvas class="sprite" width="160" height="160"></canvas></section>
-    <section id="player" class="combatant"><canvas class="sprite" width="160" height="160"></canvas></section>
+      <div id="enemy-box" class="hpbox">
+        <div class="name">포켓몬</div><div class="row"><span class="level">Lv.1</span></div>
+        <div class="gauge"><span class="tag">HP:</span><div class="bar"><span></span></div></div><div class="hpnum"></div>
+      </div>
+      <div id="player-box" class="hpbox">
+        <div class="name">포켓몬</div><div class="row"><span class="level">Lv.1</span></div>
+        <div class="gauge"><span class="tag">HP:</span><div class="bar"><span></span></div></div><div class="hpnum">0/ 0</div>
+        <div id="expbar"></div>
+      </div>
+      <div id="trainer-party" hidden aria-label="관장 포켓몬"></div>
+    </section>
 
-    <div id="enemy-box" class="hpbox">
-      <div class="name">야생 포켓몬</div>
-      <div class="row"><span class="level">Lv.1</span></div>
-      <div class="gauge"><span class="tag">HP</span><div class="bar"><span></span></div></div>
-      <div class="hpnum"></div>
-    </div>
+    <div id="textbox" class="frame"><div id="message">전투 준비</div><div id="cursor">▼</div></div>
 
-    <div id="player-box" class="hpbox">
-      <div class="name">포켓몬</div>
-      <div class="row"><span class="level">Lv.1</span></div>
-      <div class="gauge"><span class="tag">HP</span><div class="bar"><span></span></div></div>
-      <div class="hpnum">0/ 0</div>
-    </div>
+    <section id="command-menu">
+      <div id="command-prompt">포켓몬은<br>무엇을 할까?</div>
+      <div id="command-list" class="frame">
+        <button id="fight" class="command" type="button">FIGHT</button>
+        <button id="party-command" class="command" type="button">PKMN</button>
+        <button id="pack-command" class="command" type="button">PACK</button>
+        <button id="run" class="command" type="button">RUN</button>
+      </div>
+    </section>
 
-    <div id="textbox">
-      <div id="message">전투 준비</div>
-      <div id="cursor">▼</div>
-    </div>
-
-    <div id="menu">
-      <div id="move-list"></div>
-      <div id="move-info">
+    <section id="menu">
+      <div id="move-info" class="frame">
         <div class="kv"><span>TYPE/</span><b id="info-type">—</b></div>
         <div class="kv"><span>PP</span><b id="info-pp">—</b></div>
-        <div class="kv"><span>위력</span><b id="info-power">—</b></div>
-        <button id="run" type="button">도망가기</button>
+        <div class="kv power-row"><span>POWER</span><b id="info-power">—</b></div>
       </div>
-    </div>
+      <div id="move-list" class="frame"></div>
+    </section>
 
-    <div id="transition" aria-hidden="true">
-      <div class="flash"></div>
+    <div id="transition" aria-hidden="true"><div class="flash"></div>
       <div class="blinds"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
     </div>
-
-    <section id="result" aria-live="assertive" hidden>
-      <div id="result-title"></div>
-      <div id="result-xp"></div>
-      <div id="result-detail"></div>
+    <section id="result" class="frame" aria-live="assertive" hidden>
+      <div id="result-title"></div><div id="result-xp"></div><div id="result-detail"></div>
     </section>
   </main>
   <script type="module" src="./battle-window.js"></script>

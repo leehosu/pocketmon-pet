@@ -1,9 +1,10 @@
 // AI-GENERATED: 실행 중에만 진행되는 잘린 기하분포 야생 조우 스케줄.
-export const ENCOUNTER_MIN_DELAY_MS = 10 * 60 * 1000;
-export const ENCOUNTER_MAX_DELAY_MS = 120 * 60 * 1000;
-export const ENCOUNTER_MIN_VISIBLE_MS = 15 * 1000;
-export const ENCOUNTER_MAX_VISIBLE_MS = 45 * 1000;
-export const ENCOUNTER_CHANCE_PER_MINUTE = 1 / 30;
+// 평균 약 19분(최소 8분, 최대 45분): 작업을 방해하지 않으면서 한 시간에 2~3번 만난다.
+export const ENCOUNTER_MIN_DELAY_MS = 8 * 60 * 1000;
+export const ENCOUNTER_MAX_DELAY_MS = 45 * 60 * 1000;
+export const ENCOUNTER_MIN_VISIBLE_MS = 30 * 1000;
+export const ENCOUNTER_MAX_VISIBLE_MS = 50 * 1000;
+export const ENCOUNTER_CHANCE_PER_MINUTE = 1 / 12;
 
 function unitRandom(rng) {
   const value = Number(rng());

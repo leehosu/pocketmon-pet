@@ -23,6 +23,16 @@ function battle({
 }
 
 describe('Generation II battle state machine', () => {
+  it('executes Falkner\'s Mud-Slap and lowers accuracy', () => {
+    const start = battle({
+      playerId: 152, playerLevel: 7, playerMoves: ['razor-leaf'],
+      enemyId: 16, enemyLevel: 7, enemyMoves: [189],
+    });
+    const result = resolveGen2Turn(start, 'razor-leaf', () => 0.99);
+    expect(result.state.player.stages.accuracy).toBe(-1);
+    expect(result.events).toContainEqual(expect.objectContaining({ kind: 'stat', stat: 'accuracy', change: -1 }));
+  });
+
   it('applies real damage and super effectiveness', () => {
     const start = battle();
     const result = resolveGen2Turn(start, 'thunder-shock', steadyRng);

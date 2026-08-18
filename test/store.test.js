@@ -14,14 +14,16 @@ describe('store', () => {
     expect(s.locked).toBe(false);
     expect(s.level).toBe(1);
     expect(s.battleProfile).toBe(null);
+    expect(s.gymBadges).toEqual([]);
   });
 
   it('round-trips save/load (plain JSON)', () => {
-    const s = { ...defaultState(), species: 'fire', xp: xpForLevel(5), locked: true };
+    const s = { ...defaultState(), species: 'fire', xp: xpForLevel(5), locked: true, gymBadges: ['zephyr'] };
     saveState(dir, s);
     const loaded = loadState(dir);
     expect(loaded.xp).toBe(xpForLevel(5));
     expect(loaded.level).toBe(5); // derived from xp
+    expect(loaded.gymBadges).toEqual(['zephyr']);
   });
 
   it('recovers (resets) from corrupt save file', () => {

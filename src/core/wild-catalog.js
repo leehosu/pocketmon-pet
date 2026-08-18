@@ -10,8 +10,14 @@ function unitRandom(rng) {
 
 export function eligibleWildSpecies(playerLevel, catalog = GOLD_WILD_CATALOG) {
   const level = Math.max(1, Math.min(100, Math.floor(Number(playerLevel) || 1)));
+  const lower = Math.max(1, level - 2);
   const upper = Math.min(100, level + 2);
-  return catalog.filter((entry) => entry.minLevel <= upper);
+  const overlapping = catalog.filter((entry) => entry.minLevel <= upper && entry.maxLevel >= lower);
+  if (overlapping.length) return overlapping;
+  // 원작 출현 레벨이 플레이어보다 모두 낮아지는 후반에는 가장 강한 야생군만 남긴다.
+  const available = catalog.filter((entry) => entry.minLevel <= upper);
+  const strongest = Math.max(0, ...available.map((entry) => entry.maxLevel));
+  return available.filter((entry) => entry.maxLevel === strongest);
 }
 
 export function chooseWildEncounter(playerLevel, rng = Math.random, catalog = GOLD_WILD_CATALOG) {
@@ -20,8 +26,10 @@ export function chooseWildEncounter(playerLevel, rng = Math.random, catalog = GO
   if (!candidates.length) return null;
   const row = candidates[Math.floor(unitRandom(rng) * candidates.length)];
   const lower = Math.max(1, level - 2, row.minLevel);
-  const upper = Math.min(100, level + 2);
-  const wildLevel = lower + Math.floor(unitRandom(rng) * (upper - lower + 1));
+  const upper = Math.min(100, level + 2, row.maxLevel);
+  const wildLevel = upper < lower
+    ? row.maxLevel
+    : lower + Math.floor(unitRandom(rng) * (upper - lower + 1));
   return { speciesId: row.id, level: wildLevel };
 }
 

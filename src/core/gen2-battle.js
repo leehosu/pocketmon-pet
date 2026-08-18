@@ -54,6 +54,8 @@ const SUPPORTED_WILD_DAMAGE_EFFECTS = new Set([
   'EFFECT_DEFENSE_DOWN_HIT',
   'EFFECT_SPEED_DOWN_HIT',
   'EFFECT_SP_DEF_DOWN_HIT',
+  'EFFECT_ACCURACY_DOWN_HIT',
+  'EFFECT_GUST',
 ]);
 
 function randomByte(rng) {
@@ -307,6 +309,8 @@ function applyDamageSecondary(state, actorKey, targetKey, move, damage, targetMo
     changeStage(target, 'speed', -1, events, targetKey);
   } else if (chance && move.effect === 'EFFECT_SP_DEF_DOWN_HIT') {
     changeStage(target, 'specialDefense', -1, events, targetKey);
+  } else if (chance && move.effect === 'EFFECT_ACCURACY_DOWN_HIT') {
+    changeStage(target, 'accuracy', -1, events, targetKey);
   }
 
   if (move.effect === 'EFFECT_RECOIL_HIT') {
