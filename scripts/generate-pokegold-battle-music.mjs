@@ -1,15 +1,17 @@
-// AI-GENERATED: pret/pokegold의 야생 배틀 악보를 브라우저용 음표 시퀀스로 변환한다.
+// AI-GENERATED: pret/pokegold의 야생·트레이너 배틀 악보를 브라우저용 음표 시퀀스로 변환한다.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = resolve(process.argv[2] || '/tmp/pokegold');
-const sourcePath = join(sourceRoot, 'audio/music/johtowildbattle.asm');
+const wildSourcePath = join(sourceRoot, 'audio/music/johtowildbattle.asm');
+const trainerSourcePath = join(sourceRoot, 'audio/music/johtotrainerbattle.asm');
 const sfxPath = join(sourceRoot, 'audio/sfx.asm');
 const outputPath = join(repoRoot, 'src/renderer/pokegold-battle-music-data.js');
 const audioDir = join(repoRoot, 'src/renderer/assets/audio');
-const source = readFileSync(sourcePath, 'utf8');
+const wildSource = readFileSync(wildSourcePath, 'utf8');
+const trainerSource = readFileSync(trainerSourcePath, 'utf8');
 const sfxSource = readFileSync(sfxPath, 'utf8');
 
 const PITCH = Object.freeze({
@@ -32,7 +34,7 @@ function number(value) {
   return parsed;
 }
 
-function parseInstructions() {
+function parseInstructions(source) {
   const labels = new Map();
   const instructions = [];
   let scope = null;
@@ -53,8 +55,6 @@ function parseInstructions() {
   return { labels, instructions };
 }
 
-const { labels, instructions } = parseInstructions();
-
 function parseRunSfx() {
   const body = sfxSource.match(/Sfx_Run_Ch8:\s*([\s\S]*?)\bsound_ret\b/)?.[1];
   if (!body) throw new Error('Sfx_Run_Ch8을 찾을 수 없습니다');
@@ -69,14 +69,15 @@ function parseRunSfx() {
   };
 }
 
-function targetIndex(instruction, target) {
+function targetIndex(instruction, target, labels) {
   const name = target.startsWith('.') ? `${instruction.scope}${target}` : target;
   const index = labels.get(name);
   if (index == null) throw new Error(`찾을 수 없는 악보 라벨: ${name}`);
   return index;
 }
 
-function compileChannel(name, wave) {
+function compileChannel(name, wave, parsed, initialTempo) {
+  const { labels, instructions } = parsed;
   let pc = labels.get(name);
   if (pc == null) throw new Error(`채널이 없습니다: ${name}`);
   const mainLoop = labels.get(`${name}.mainloop`);
@@ -84,7 +85,7 @@ function compileChannel(name, wave) {
   const loopCounts = new Map();
   const events = [];
   let loopEventIndex = null;
-  let tempo = 104;
+  let tempo = initialTempo;
   let noteLength = 12;
   let octave = 4;
   let volume = wave === 'triangle' ? 1 : 12;
@@ -120,7 +121,7 @@ function compileChannel(name, wave) {
       events.push([midi, frames, volume, duty]);
     } else if (op === 'sound_call') {
       calls.push(pc + 1);
-      pc = targetIndex(instruction, args[0]);
+      pc = targetIndex(instruction, args[0], labels);
       continue;
     } else if (op === 'sound_ret') {
       if (!calls.length) break;
@@ -135,7 +136,7 @@ function compileChannel(name, wave) {
       const remaining = loopCounts.has(pc) ? loopCounts.get(pc) : count - 1;
       if (remaining > 0) {
         loopCounts.set(pc, remaining - 1);
-        pc = targetIndex(instruction, args[1]);
+        pc = targetIndex(instruction, args[1], labels);
         continue;
       }
       loopCounts.delete(pc);
@@ -156,33 +157,39 @@ function compileChannel(name, wave) {
   };
 }
 
-const music = {
-  source: 'pret/pokegold audio/music/johtowildbattle.asm',
-  tempo: 104,
-  framesPerSecond: 59.7275,
-  runSfx: parseRunSfx(),
-  channels: [
-    compileChannel('Music_JohtoWildBattle_Ch1', 'square'),
-    compileChannel('Music_JohtoWildBattle_Ch2', 'square'),
-    compileChannel('Music_JohtoWildBattle_Ch3', 'triangle'),
-  ],
-};
+function compileMusic(source, fileName, label, tempo) {
+  const parsed = parseInstructions(source);
+  return {
+    source: `pret/pokegold audio/music/${fileName}`,
+    tempo,
+    framesPerSecond: 59.7275,
+    runSfx: parseRunSfx(),
+    channels: [
+      compileChannel(`${label}_Ch1`, 'square', parsed, tempo),
+      compileChannel(`${label}_Ch2`, 'square', parsed, tempo),
+      compileChannel(`${label}_Ch3`, 'triangle', parsed, tempo),
+    ],
+  };
+}
+
+const music = compileMusic(wildSource, 'johtowildbattle.asm', 'Music_JohtoWildBattle', 104);
+const trainerMusic = compileMusic(trainerSource, 'johtotrainerbattle.asm', 'Music_JohtoTrainerBattle', 102);
 
 function waveform(type, phase) {
   if (type === 'triangle') return 1 - 4 * Math.abs(Math.round(phase) - phase);
   return (phase % 1) < 0.25 ? 1 : -1;
 }
 
-function renderWav(fileName, sequenceKey) {
+function renderWav(score, fileName, sequenceKey) {
   const sampleRate = 22_050;
-  const totalFrames = music.channels[0][`${sequenceKey}Frames`];
-  const sampleCount = Math.ceil(totalFrames / music.framesPerSecond * sampleRate);
+  const totalFrames = score.channels[0][`${sequenceKey}Frames`];
+  const sampleCount = Math.ceil(totalFrames / score.framesPerSecond * sampleRate);
   const mix = new Float64Array(sampleCount);
 
-  for (const channel of music.channels) {
+  for (const channel of score.channels) {
     let startsAt = 0;
     for (const [note, frames, envelope] of channel[sequenceKey]) {
-      const duration = frames / music.framesPerSecond;
+      const duration = frames / score.framesPerSecond;
       const startSample = Math.round(startsAt * sampleRate);
       const endSample = Math.min(sampleCount, Math.round((startsAt + duration) * sampleRate));
       if (note != null) {
@@ -281,10 +288,13 @@ function renderRunWav() {
 }
 
 const output = `// AI-GENERATED: pret/pokegold 배틀 음악과 SFX에서 생성. 직접 수정하지 않는다.\n`
-  + `export const JOHTO_WILD_BATTLE = ${JSON.stringify(music)};\n`;
+  + `export const JOHTO_WILD_BATTLE = ${JSON.stringify(music)};\n`
+  + `export const JOHTO_TRAINER_BATTLE = ${JSON.stringify(trainerMusic)};\n`;
 writeFileSync(outputPath, output);
 mkdirSync(audioDir, { recursive: true });
-renderWav('johto-wild-battle-intro.wav', 'intro');
-renderWav('johto-wild-battle-loop.wav', 'loop');
+renderWav(music, 'johto-wild-battle-intro.wav', 'intro');
+renderWav(music, 'johto-wild-battle-loop.wav', 'loop');
+renderWav(trainerMusic, 'johto-trainer-battle-intro.wav', 'intro');
+renderWav(trainerMusic, 'johto-trainer-battle-loop.wav', 'loop');
 renderRunWav();
 console.log(`Generated ${outputPath}`);

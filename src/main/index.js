@@ -39,20 +39,35 @@ import {
   nextEncounterDelayMs,
   wildAppearanceDurationMs,
 } from '../core/encounter-scheduler.js';
-import { chooseWildEncounter } from '../core/wild-catalog.js';
+import { chooseGoldStoryEncounter } from '../core/wild-catalog.js';
 import { prepareWildPokemon } from './wild-service.js';
 import { battleWindowBounds } from '../core/battle-window-bounds.js';
 import { gymLeaderWindowBounds } from '../core/gym-leader-window-bounds.js';
 import {
+  BUGSY_CHALLENGE,
   FALKNER_CHALLENGE,
   FALKNER_APPEARANCE_MS,
   FALKNER_LOSS_RETRY_MS,
   FALKNER_RETRY_MS,
+  awardHiveBadge,
   awardZephyrBadge,
   canChallengeFalkner,
   falknerAppearanceDelayMs,
   trainerBattleExperience,
 } from '../core/gym-challenge.js';
+import {
+  ROCKET_GRUNTS,
+  canChallengeBugsy,
+  currentRocketGrunt,
+  recordRocketGruntVictory,
+} from '../core/azalea-story.js';
+import {
+  BUGSY_SPRITE_DATA_URL,
+  CHRIS_BACK_SPRITE_DATA_URL,
+  FALKNER_SPRITE_DATA_URL,
+  ROCKET_GRUNT_F_SPRITE_DATA_URL,
+  ROCKET_GRUNT_M_SPRITE_DATA_URL,
+} from '../renderer/trainer-sprites.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -624,9 +639,28 @@ function refreshCustomSpritesIfChanged() {
   return loadCustomSprites(dir);
 }
 
-// ---- AI-GENERATED: 조건 달성 시 펫 옆에 직접 등장하는 도라지시티 관장 비상 ----
+// ---- AI-GENERATED: 조건 달성 시 펫 옆에 직접 등장하는 관장·로켓단 스토리 이벤트 ----
+function nextTrainerChallenge() {
+  if (canChallengeFalkner(state)) {
+    return { ...FALKNER_CHALLENGE, sprite: FALKNER_SPRITE_DATA_URL, trainerClass: `체육관 관장 ${FALKNER_CHALLENGE.name}` };
+  }
+  const grunt = currentRocketGrunt(state);
+  if (grunt) {
+    return {
+      ...grunt,
+      dvs: { attack: 9, defense: 10, speed: 7, special: 7 },
+      sprite: grunt.gender === 'f' ? ROCKET_GRUNT_F_SPRITE_DATA_URL : ROCKET_GRUNT_M_SPRITE_DATA_URL,
+      trainerClass: '로켓단 조무래기',
+    };
+  }
+  if (canChallengeBugsy(state)) {
+    return { ...BUGSY_CHALLENGE, sprite: BUGSY_SPRITE_DATA_URL, trainerClass: `체육관 관장 ${BUGSY_CHALLENGE.name}` };
+  }
+  return null;
+}
+
 function scheduleNextGymLeader(now = Date.now(), delay = falknerAppearanceDelayMs(Math.random)) {
-  nextGymLeaderAt = canChallengeFalkner(state) ? now + Math.max(0, delay) : 0;
+  nextGymLeaderAt = nextTrainerChallenge() ? now + Math.max(0, delay) : 0;
 }
 
 function clearGymLeaderExpiry() {
@@ -649,10 +683,14 @@ function finishUnclaimedGymLeader() {
 
 function sendGymLeaderState() {
   if (!gymLeaderWindow || gymLeaderWindow.isDestroyed() || !currentGymEncounter) return;
+  const challenge = currentGymEncounter.challenge;
   gymLeaderWindow.webContents.send('gym-leader-state', {
     id: currentGymEncounter.id,
-    leaderName: FALKNER_CHALLENGE.name,
-    badgeName: FALKNER_CHALLENGE.badgeName,
+    trainerName: challenge.name,
+    role: challenge.role,
+    line: challenge.line,
+    action: challenge.action,
+    sprite: challenge.sprite,
     expiresAt: currentGymEncounter.expiresAt,
     busy: gymLeaderPreparing,
     error: currentGymEncounter.error || null,
@@ -701,19 +739,21 @@ function createGymLeaderWindow(encounter) {
   }, Math.max(0, encounter.expiresAt - Date.now()));
 }
 
-function prepareAndShowFalkner(force = false) {
+function prepareAndShowTrainer(forcedChallenge = null) {
   if (encounterPreparing || gymLeaderPreparing || currentGymEncounter || currentEncounter || currentBattle || !state?.hatched) return;
-  if (!force && !canChallengeFalkner(state)) return;
+  const challenge = forcedChallenge || nextTrainerChallenge();
+  if (!challenge) return;
   nextGymLeaderAt = 0;
   currentGymEncounter = {
     id: randomUUID(),
     expiresAt: Date.now() + FALKNER_APPEARANCE_MS,
     error: null,
+    challenge,
   };
   createGymLeaderWindow(currentGymEncounter);
 }
 
-async function acceptFalknerChallenge(encounterId) {
+async function acceptTrainerChallenge(encounterId) {
   if (!currentGymEncounter || currentGymEncounter.id !== encounterId || currentBattle || gymLeaderPreparing) return;
   if (Date.now() >= currentGymEncounter.expiresAt) {
     finishUnclaimedGymLeader();
@@ -723,8 +763,9 @@ async function acceptFalknerChallenge(encounterId) {
   currentGymEncounter.error = null;
   sendGymLeaderState();
   const acceptedId = currentGymEncounter.id;
+  const challenge = currentGymEncounter.challenge;
   try {
-    const team = await Promise.all(FALKNER_CHALLENGE.team.map(async (member) => {
+    const team = await Promise.all(challenge.team.map(async (member) => {
       const prepared = await prepareWildPokemon({
         cacheDir: dataDir(),
         speciesId: member.speciesId,
@@ -733,8 +774,8 @@ async function acceptFalknerChallenge(encounterId) {
       return {
         ...prepared,
         ...member,
-        dvs: { ...FALKNER_CHALLENGE.dvs },
-        moveIds: [...member.moveIds],
+        dvs: { ...challenge.dvs },
+        moveIds: [...(member.moveIds || prepared.moveIds)],
       };
     }));
     if (!currentGymEncounter || currentGymEncounter.id !== acceptedId || currentBattle) return;
@@ -743,7 +784,7 @@ async function acceptFalknerChallenge(encounterId) {
       : mainWindow?.getBounds();
     closeGymLeaderWindow();
     currentGymEncounter = null;
-    startTrainerBattle(team, anchorBounds);
+    startTrainerBattle(team, anchorBounds, challenge);
   } catch {
     if (currentGymEncounter?.id === acceptedId) {
       currentGymEncounter.error = '포켓몬을 준비하지 못했습니다. 잠시 뒤 다시 도전해 주세요.';
@@ -755,13 +796,13 @@ async function acceptFalknerChallenge(encounterId) {
 }
 
 function runGymLeaderScheduler(now = Date.now()) {
-  if (!canChallengeFalkner(state)) {
+  if (!nextTrainerChallenge()) {
     nextGymLeaderAt = 0;
     return;
   }
   if (currentGymEncounter || currentEncounter || currentBattle || encounterPreparing || gymLeaderPreparing) return;
   if (!nextGymLeaderAt) scheduleNextGymLeader(now);
-  if (now >= nextGymLeaderAt) prepareAndShowFalkner();
+  if (now >= nextGymLeaderAt) prepareAndShowTrainer();
 }
 
 // ---- AI-GENERATED: 야생 조우와 2세대 전투 창 수명주기 ----
@@ -849,7 +890,10 @@ async function prepareAndShowWildEncounter(force = false) {
   encounterPreparing = true;
   nextEncounterAt = 0;
   try {
-    const selected = chooseWildEncounter(state.level || 1, Math.random);
+    const selected = chooseGoldStoryEncounter(state, {
+      rng: Math.random,
+      period: process.env.POCKETMON_FORCE_TIME,
+    });
     if (!selected) throw new Error('No eligible Gold encounter');
     const prepared = await prepareWildPokemon({ cacheDir: dataDir(), ...selected });
     if (currentEncounter || currentGymEncounter || currentBattle || !state?.hatched) return;
@@ -900,6 +944,9 @@ function battlePayload(events = [], previousBattle = null) {
     battleKind: currentBattle.kind,
     canRun: currentBattle.canRun,
     trainerName: currentBattle.trainerName,
+    trainerClass: currentBattle.trainerClass,
+    trainerSprite: currentBattle.trainerSprite,
+    playerTrainerSprite: currentBattle.playerTrainerSprite,
     trainerHasNext: currentBattle.kind === 'trainer'
       && currentBattle.battle.winner === 'player'
       && currentBattle.teamIndex < currentBattle.team.length - 1,
@@ -994,7 +1041,7 @@ function createBattleWindow(anchorBounds) {
   });
 }
 
-function createBattleForEncounter(encounter, carriedPlayer = null) {
+function createBattleForEncounter(encounter) {
   const line = dexLine(state.species);
   const playerSpeciesId = line[state.stage || 0];
   const roster = getSpeciesByKey(state.species);
@@ -1002,7 +1049,7 @@ function createBattleForEncounter(encounter, carriedPlayer = null) {
   const playerMoves = gen2SkillsForStage(state.species, state.stage || 0);
   const playerBackSprite = backSpriteDataUrl(state.species, state.stage || 0);
   const enemyDvs = encounter.dvs || createBattleProfile(Math.random).dvs;
-  let battle = createGen2Battle({
+  const battle = createGen2Battle({
     player: {
       speciesId: playerSpeciesId,
       name: playerName,
@@ -1020,20 +1067,6 @@ function createBattleForEncounter(encounter, carriedPlayer = null) {
       moves: encounter.moveIds,
     },
   });
-  if (carriedPlayer) {
-    battle = {
-      ...battle,
-      player: {
-        ...battle.player,
-        hp: Math.min(battle.player.maxHp, Math.max(1, carriedPlayer.hp)),
-        moves: carriedPlayer.moves.map((move) => ({ ...move })),
-        status: carriedPlayer.status,
-        confusionTurns: carriedPlayer.confusionTurns,
-        lightScreenTurns: carriedPlayer.lightScreenTurns,
-        stages: { ...carriedPlayer.stages },
-      },
-    };
-  }
   return {
     battle,
     playerMoves,
@@ -1069,7 +1102,7 @@ function startBattle(encounter) {
   createBattleWindow(encounterBounds);
 }
 
-function startTrainerBattle(team, anchorBounds) {
+function startTrainerBattle(team, anchorBounds, challenge) {
   if (!Array.isArray(team) || !team.length || currentBattle) return;
   state = ensureBattleProfile(state, Math.random);
   const prepared = createBattleForEncounter(team[0]);
@@ -1079,8 +1112,11 @@ function startTrainerBattle(team, anchorBounds) {
     ...prepared,
     kind: 'trainer',
     canRun: false,
-    trainerId: FALKNER_CHALLENGE.id,
-    trainerName: FALKNER_CHALLENGE.name,
+    trainerId: challenge.id,
+    trainerName: challenge.name,
+    trainerClass: challenge.trainerClass,
+    trainerSprite: challenge.sprite,
+    playerTrainerSprite: CHRIS_BACK_SPRITE_DATA_URL,
     team,
     teamIndex: 0,
     opponentSequence: 0,
@@ -1101,10 +1137,11 @@ function trainerHasNextOpponent() {
 
 function advanceTrainerOpponent() {
   if (!trainerHasNextOpponent()) return false;
-  const carriedPlayer = currentBattle.battle.player;
   currentBattle.teamIndex += 1;
   currentBattle.encounter = currentBattle.team[currentBattle.teamIndex];
-  const prepared = createBattleForEncounter(currentBattle.encounter, carriedPlayer);
+  // 한 마리뿐인 앱 구조에서 원작의 파티 대 파티전을 그대로 적용하면 불공정하다.
+  // 상대 교체마다 아군을 새 전투 상태로 만들어 HP·상태를 전부 회복한다.
+  const prepared = createBattleForEncounter(currentBattle.encounter);
   currentBattle.battle = prepared.battle;
   currentBattle.playerMoves = prepared.playerMoves;
   currentBattle.playerSprite = prepared.playerSprite;
@@ -1144,6 +1181,19 @@ function commitBattleOutcome() {
         ...currentBattle.resultChanges,
         gymWon: true,
         badgeEarned: FALKNER_CHALLENGE.badgeName,
+      };
+    } else if (currentBattle.kind === 'trainer' && currentBattle.trainerId.startsWith('rocket-grunt-')) {
+      state = recordRocketGruntVictory(state, currentBattle.trainerId);
+      currentBattle.resultChanges = {
+        ...currentBattle.resultChanges,
+        storyWon: true,
+      };
+    } else if (currentBattle.kind === 'trainer' && currentBattle.trainerId === BUGSY_CHALLENGE.id) {
+      state = awardHiveBadge(state);
+      currentBattle.resultChanges = {
+        ...currentBattle.resultChanges,
+        gymWon: true,
+        badgeEarned: BUGSY_CHALLENGE.badgeName,
       };
     }
   } else {
@@ -1362,7 +1412,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('pkmn:accept-gym-leader', (_e, encounterId) => {
-    acceptFalknerChallenge(encounterId);
+    acceptTrainerChallenge(encounterId);
   });
 
   ipcMain.on('pkmn:dismiss-gym-leader', (_e, encounterId) => {
@@ -1417,7 +1467,22 @@ app.whenReady().then(() => {
   scheduleNextEncounter();
   scheduleNextGymLeader();
   if (process.env.POCKETMON_FORCE_GYM === '1') {
-    setTimeout(() => prepareAndShowFalkner(true), 1_500);
+    const challenge = { ...FALKNER_CHALLENGE, sprite: FALKNER_SPRITE_DATA_URL, trainerClass: `체육관 관장 ${FALKNER_CHALLENGE.name}` };
+    setTimeout(() => prepareAndShowTrainer(challenge), 1_500);
+  }
+  if (process.env.POCKETMON_FORCE_BUGSY === '1') {
+    const challenge = { ...BUGSY_CHALLENGE, sprite: BUGSY_SPRITE_DATA_URL, trainerClass: `체육관 관장 ${BUGSY_CHALLENGE.name}` };
+    setTimeout(() => prepareAndShowTrainer(challenge), 1_500);
+  }
+  if (/^[1-4]$/.test(process.env.POCKETMON_FORCE_STORY || '')) {
+    const grunt = ROCKET_GRUNTS[Number(process.env.POCKETMON_FORCE_STORY) - 1];
+    const challenge = {
+      ...grunt,
+      dvs: { attack: 9, defense: 10, speed: 7, special: 7 },
+      sprite: grunt.gender === 'f' ? ROCKET_GRUNT_F_SPRITE_DATA_URL : ROCKET_GRUNT_M_SPRITE_DATA_URL,
+      trainerClass: '로켓단 조무래기',
+    };
+    setTimeout(() => prepareAndShowTrainer(challenge), 1_500);
   }
   if (process.env.POCKETMON_FORCE_ENCOUNTER === '1') {
     setTimeout(() => prepareAndShowWildEncounter(true), 1500);

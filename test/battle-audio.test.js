@@ -19,6 +19,15 @@ describe('battle chiptune sequence', () => {
     });
   });
 
+  it('uses the original Johto trainer score for trainer battles', () => {
+    expect(battleMusicInfo('trainer')).toEqual({
+      source: 'pret/pokegold audio/music/johtotrainerbattle.asm',
+      tempo: 102,
+      introFrames: [765, 765, 765],
+      loopFrames: [5928, 5928, 5928],
+    });
+  });
+
   it('keeps the original three-channel opening notes', () => {
     expect(JOHTO_WILD_BATTLE.channels.map((channel) => (
       channel.intro.slice(0, 4).map(([note]) => note)
@@ -68,5 +77,18 @@ describe('battle chiptune sequence', () => {
     expect(await music.playRun()).toBe(true);
     expect(players[1].paused).toBe(true);
     expect(players[2].paused).toBe(false);
+
+    const trainerPlayers = [];
+    class TrainerAudio extends FakeAudio {
+      constructor(src) {
+        super(src);
+        trainerPlayers.push(this);
+      }
+    }
+    const trainerMusic = createBattleMusic({ AudioClass: TrainerAudio, AudioContextClass: null });
+    expect(await trainerMusic.start('trainer')).toBe(true);
+    expect(trainerPlayers[0].src).toContain('johto-trainer-battle-intro.wav');
+    expect(trainerPlayers[1].src).toContain('johto-trainer-battle-loop.wav');
+    expect(trainerMusic.kind()).toBe('trainer');
   });
 });

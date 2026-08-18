@@ -1,21 +1,24 @@
-// AI-GENERATED: pret/pokegold의 3채널 야생 배틀 악보를 Web Audio로 재생한다.
-import { JOHTO_WILD_BATTLE } from './pokegold-battle-music-data.js';
+// AI-GENERATED: pret/pokegold의 3채널 야생·트레이너 배틀 악보를 Web Audio로 재생한다.
+import { JOHTO_TRAINER_BATTLE, JOHTO_WILD_BATTLE } from './pokegold-battle-music-data.js';
 
 const MASTER_VOLUME = 0.24;
 const INTRO_URL = new URL('./assets/audio/johto-wild-battle-intro.wav', import.meta.url).href;
 const LOOP_URL = new URL('./assets/audio/johto-wild-battle-loop.wav', import.meta.url).href;
+const TRAINER_INTRO_URL = new URL('./assets/audio/johto-trainer-battle-intro.wav', import.meta.url).href;
+const TRAINER_LOOP_URL = new URL('./assets/audio/johto-trainer-battle-loop.wav', import.meta.url).href;
 const RUN_URL = new URL('./assets/audio/battle-run.wav', import.meta.url).href;
 
 export function midiToFrequency(note) {
   return 440 * Math.pow(2, (Number(note) - 69) / 12);
 }
 
-export function battleMusicInfo() {
+export function battleMusicInfo(kind = 'wild') {
+  const score = kind === 'trainer' ? JOHTO_TRAINER_BATTLE : JOHTO_WILD_BATTLE;
   return {
-    source: JOHTO_WILD_BATTLE.source,
-    tempo: JOHTO_WILD_BATTLE.tempo,
-    introFrames: JOHTO_WILD_BATTLE.channels.map((channel) => channel.introFrames),
-    loopFrames: JOHTO_WILD_BATTLE.channels.map((channel) => channel.loopFrames),
+    source: score.source,
+    tempo: score.tempo,
+    introFrames: score.channels.map((channel) => channel.introFrames),
+    loopFrames: score.channels.map((channel) => channel.loopFrames),
   };
 }
 
@@ -31,6 +34,7 @@ export function createBattleMusic({
   let running = false;
   let muted = false;
   let victoryPlayed = false;
+  let musicKind = null;
 
   function ensureContext() {
     if (context || !AudioContextClass) return Boolean(context);
@@ -41,11 +45,12 @@ export function createBattleMusic({
     return true;
   }
 
-  function ensurePlayers() {
+  function ensurePlayers(kind = 'wild') {
     if (introAudio && loopAudio && runAudio) return true;
     if (!AudioClass) return false;
-    introAudio = new AudioClass(INTRO_URL);
-    loopAudio = new AudioClass(LOOP_URL);
+    musicKind = kind === 'trainer' ? 'trainer' : 'wild';
+    introAudio = new AudioClass(musicKind === 'trainer' ? TRAINER_INTRO_URL : INTRO_URL);
+    loopAudio = new AudioClass(musicKind === 'trainer' ? TRAINER_LOOP_URL : LOOP_URL);
     runAudio = new AudioClass(RUN_URL);
     introAudio.preload = 'auto';
     loopAudio.preload = 'auto';
@@ -78,8 +83,8 @@ export function createBattleMusic({
     oscillator.stop(at + duration + 0.015);
   }
 
-  async function start() {
-    if (!ensurePlayers() || victoryPlayed) return false;
+  async function start(kind = 'wild') {
+    if (!ensurePlayers(kind) || victoryPlayed) return false;
     if (running && (!introAudio.paused || !loopAudio.paused)) return true;
     running = true;
     introAudio.currentTime = 0;
@@ -152,5 +157,6 @@ export function createBattleMusic({
     start, stopLoop, playVictory, playRun, setMuted, stop,
     isMuted: () => muted,
     isPlaying: () => running,
+    kind: () => musicKind,
   };
 }

@@ -1,5 +1,8 @@
 // AI-GENERATED: PokéAPI Gold 출현 기록과 레벨업 기술에서 야생전 입력을 만든다.
 import { GOLD_WILD_CATALOG } from './data/gold-wild.generated.js';
+import { GOLD_STORY_WILD_ZONES } from './data/gold-story-wild.generated.js';
+import { goldTimePeriod, normalizeGoldTimePeriod } from './gold-time.js';
+import { ZEPHYR_BADGE, normalizeGymBadges } from './gym-challenge.js';
 import { isSupportedWildMove } from './gen2-battle.js';
 import { resourceId } from './gen2-data.js';
 
@@ -33,6 +36,38 @@ export function chooseWildEncounter(playerLevel, rng = Math.random, catalog = GO
   return { speciesId: row.id, level: wildLevel };
 }
 
+function weightedPick(rows, weightOf, rng) {
+  const total = rows.reduce((sum, row) => sum + Math.max(0, weightOf(row)), 0);
+  if (total <= 0) return null;
+  let cursor = unitRandom(rng) * total;
+  for (const row of rows) {
+    cursor -= Math.max(0, weightOf(row));
+    if (cursor < 0) return row;
+  }
+  return rows.at(-1) || null;
+}
+
+export function goldWildZoneForState(state) {
+  return normalizeGymBadges(state?.gymBadges).includes(ZEPHYR_BADGE) ? 'azalea' : 'violet';
+}
+
+export function chooseGoldStoryEncounter(state, options = {}) {
+  const rng = options.rng || Math.random;
+  const period = normalizeGoldTimePeriod(options.period) || goldTimePeriod(options.now);
+  const zone = goldWildZoneForState(state);
+  const maps = GOLD_STORY_WILD_ZONES[zone] || [];
+  const selectedMap = weightedPick(maps, (entry) => entry.rate, rng);
+  const slot = selectedMap && weightedPick(selectedMap.periods[period] || [], (entry) => entry.weight, rng);
+  if (!slot) return null;
+  return {
+    speciesId: slot.speciesId,
+    level: slot.level,
+    mapId: selectedMap.id,
+    period,
+    zone,
+  };
+}
+
 export function goldSilverLevelMoveIds(pokemon, level) {
   const learned = [];
   for (const [order, entry] of (pokemon?.moves || []).entries()) {
@@ -50,4 +85,4 @@ export function goldSilverLevelMoveIds(pokemon, level) {
   return [...new Set(latest.map((entry) => entry.id))].filter((id) => isSupportedWildMove(id));
 }
 
-export { GOLD_WILD_CATALOG };
+export { GOLD_WILD_CATALOG, GOLD_STORY_WILD_ZONES };

@@ -1,5 +1,6 @@
 // AI-GENERATED: 성도 체육관 도전의 해금 조건·파티·배지 상태를 순수 데이터로 관리한다.
 export const ZEPHYR_BADGE = 'zephyr';
+export const HIVE_BADGE = 'hive';
 export const FALKNER_REQUIRED_WINS = 3;
 export const FALKNER_REQUIRED_LEVEL = 7;
 export const FALKNER_MIN_APPEAR_DELAY_MS = 2 * 60 * 1000;
@@ -11,6 +12,9 @@ export const FALKNER_LOSS_RETRY_MS = 15 * 60 * 1000;
 export const FALKNER_CHALLENGE = Object.freeze({
   id: 'falkner',
   name: '비상',
+  role: '도라지시티 체육관 관장',
+  line: '새처럼 우아한 비행포켓몬의 힘, 받아낼 수 있겠어?',
+  action: '비상에게 도전한다',
   badgeKey: ZEPHYR_BADGE,
   badgeName: '윙배지',
   dvs: Object.freeze({ attack: 9, defense: 10, speed: 7, special: 7 }),
@@ -20,7 +24,23 @@ export const FALKNER_CHALLENGE = Object.freeze({
   ]),
 });
 
-const KNOWN_BADGES = new Set([ZEPHYR_BADGE]);
+export const BUGSY_CHALLENGE = Object.freeze({
+  id: 'bugsy',
+  name: '호일',
+  role: '고동마을 체육관 관장',
+  line: '벌레포켓몬에 관한 지식이라면 누구에게도 지지 않아!',
+  action: '호일에게 도전한다',
+  badgeKey: HIVE_BADGE,
+  badgeName: '인섹트배지',
+  dvs: Object.freeze({ attack: 9, defense: 10, speed: 7, special: 7 }),
+  team: Object.freeze([
+    Object.freeze({ speciesId: 11, name: '단데기', level: 14, moveIds: Object.freeze([33, 81, 106]) }),
+    Object.freeze({ speciesId: 14, name: '딱충이', level: 14, moveIds: Object.freeze([40, 81, 106]) }),
+    Object.freeze({ speciesId: 123, name: '스라크', level: 16, moveIds: Object.freeze([98, 43, 210]) }),
+  ]),
+});
+
+const KNOWN_BADGES = new Set([ZEPHYR_BADGE, HIVE_BADGE]);
 
 export function normalizeGymBadges(value) {
   if (!Array.isArray(value)) return [];
@@ -47,6 +67,12 @@ export function awardZephyrBadge(state) {
   const badges = normalizeGymBadges(state?.gymBadges);
   if (badges.includes(ZEPHYR_BADGE)) return { ...state, gymBadges: badges };
   return { ...state, gymBadges: [...badges, ZEPHYR_BADGE] };
+}
+
+export function awardHiveBadge(state) {
+  const badges = normalizeGymBadges(state?.gymBadges);
+  if (badges.includes(HIVE_BADGE)) return { ...state, gymBadges: badges };
+  return { ...state, gymBadges: [...badges, HIVE_BADGE] };
 }
 
 export function trainerBattleExperience(team, experienceForSpecies) {

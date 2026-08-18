@@ -1,23 +1,24 @@
-// AI-GENERATED: 골드 원작 비상 스프라이트와 데스크톱 도전 입력을 표시한다.
+// AI-GENERATED: 골드 원작 관장·로켓단 스프라이트와 데스크톱 도전 입력을 표시한다.
 import { loadSpriteCutout } from './sprite-alpha.js';
-import { FALKNER_SPRITE_DATA_URL } from './trainer-sprites.js';
 
 const canvas = document.getElementById('leader');
 const context = canvas.getContext('2d');
 const challenge = document.getElementById('challenge');
 const close = document.getElementById('close');
 const line = document.getElementById('line');
+const role = document.getElementById('role');
+const name = document.getElementById('name');
 const timeFill = document.querySelector('#time>span');
 
 let encounter = null;
 let shownAt = Date.now();
 
-async function drawFalkner() {
+async function drawTrainer(sprite) {
   context.clearRect(0, 0, canvas.width, canvas.height);
   try {
-    const sprite = await loadSpriteCutout(FALKNER_SPRITE_DATA_URL);
+    const image = await loadSpriteCutout(sprite);
     context.imageSmoothingEnabled = false;
-    context.drawImage(sprite, 0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
   } catch { /* 대사와 도전 버튼은 계속 동작한다 */ }
 }
 
@@ -44,11 +45,15 @@ window.pkmn?.onGymLeaderState?.((payload) => {
   encounter = payload;
   if (changed) shownAt = Date.now();
   challenge.disabled = Boolean(payload.busy);
-  challenge.textContent = payload.busy ? '포켓몬을 준비하는 중…' : '승부를 받아들인다';
+  challenge.textContent = payload.busy ? '포켓몬을 준비하는 중…' : payload.action;
+  role.textContent = payload.role;
+  name.textContent = payload.trainerName;
+  canvas.setAttribute('aria-label', payload.trainerName);
+  close.setAttribute('aria-label', `${payload.trainerName} 돌려보내기`);
   line.textContent = payload.error
     ? payload.error
-    : '새처럼 우아한 비행포켓몬의 힘, 받아낼 수 있겠어?';
+    : payload.line;
+  if (changed) drawTrainer(payload.sprite);
 });
 
-drawFalkner();
 requestAnimationFrame(animateLife);

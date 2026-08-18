@@ -15,6 +15,7 @@ describe('store', () => {
     expect(s.level).toBe(1);
     expect(s.battleProfile).toBe(null);
     expect(s.gymBadges).toEqual([]);
+    expect(s.storyProgress).toEqual({ slowpokeWellGrunts: 0, slowpokeWellCleared: false });
   });
 
   it('round-trips save/load (plain JSON)', () => {

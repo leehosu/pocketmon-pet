@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GEN2_SKILLS_BY_KEY } from '../src/core/gsc-moves.js';
 import {
-  createGen2Battle, resolveGen2Turn,
+  createGen2Battle, isSupportedWildMove, resolveGen2Turn,
 } from '../src/core/gen2-battle.js';
 
 const dvs = { attack: 8, defense: 8, speed: 8, special: 8 };
@@ -100,5 +100,28 @@ describe('Generation II battle state machine', () => {
     expect(result.state.winner).toBe('player');
     expect(result.events.some((event) => event.kind === 'faint' && event.target === 'enemy')).toBe(true);
     expect(result.events.filter((event) => event.kind === 'move')).toHaveLength(1);
+  });
+
+  it('supports Bugsy’s poison, String Shot, Harden, Leer, and Fury Cutter moves', () => {
+    for (const id of [40, 43, 81, 98, 106, 210]) expect(isSupportedWildMove(id), String(id)).toBe(true);
+
+    const poison = resolveGen2Turn(battle({ playerMoves: [33], enemyId: 14, enemyMoves: [40] }), 33, () => 0);
+    expect(poison.state.player.status).toBe('poison');
+
+    const stringShot = resolveGen2Turn(battle({ enemyId: 11, enemyMoves: [81] }), 'thunder-shock', steadyRng);
+    expect(stringShot.state.player.stages.speed).toBe(-1);
+
+    const harden = resolveGen2Turn(battle({ enemyId: 11, enemyMoves: [106] }), 'thunder-shock', steadyRng);
+    expect(harden.state.enemy.stages.defense).toBe(1);
+
+    const leer = resolveGen2Turn(battle({ enemyId: 123, enemyMoves: [43] }), 'thunder-shock', steadyRng);
+    expect(leer.state.player.stages.defense).toBe(-1);
+
+    const start = battle({ playerId: 123, playerMoves: [210], enemyId: 152, enemyMoves: [106] });
+    const first = resolveGen2Turn(start, 210, steadyRng);
+    const second = resolveGen2Turn(first.state, 210, steadyRng);
+    const firstDamage = first.events.find((event) => event.kind === 'damage' && event.target === 'enemy').amount;
+    const secondDamage = second.events.find((event) => event.kind === 'damage' && event.target === 'enemy').amount;
+    expect(secondDamage).toBeGreaterThan(firstDamage);
   });
 });

@@ -3,10 +3,6 @@
 // 하단 텍스트 박스, 기술 선택 시 텍스트 박스를 메뉴가 대체.
 import { loadSpriteCutout } from './sprite-alpha.js';
 import { createBattleMusic } from './battle-audio.js';
-import {
-  CHRIS_BACK_SPRITE_DATA_URL,
-  FALKNER_SPRITE_DATA_URL,
-} from './trainer-sprites.js';
 import { battleResultView } from './battle-result.js';
 import { battleEventSchedule, battleTimelineDuration } from '../core/battle-timeline.js';
 import {
@@ -57,7 +53,7 @@ let commandMessageTimer = null;
 
 async function ensureBattleMusic() {
   if (musicMuted || latest?.battle?.winner) return false;
-  const started = await battleMusic.start().catch(() => false);
+  const started = await battleMusic.start(latest?.battleKind).catch(() => false);
   musicButton.dataset.audioState = started ? 'playing' : 'blocked';
   if (!started) {
     musicButton.title = '배틀 음악을 재생하려면 클릭';
@@ -154,11 +150,11 @@ async function drawSprite(key, src) {
   } catch { /* 데이터 준비 실패 시 텍스트/HP 전투는 유지 */ }
 }
 
-function drawTrainerIntroSprites() {
+function drawTrainerIntroSprites(payload) {
   spriteSources.delete('enemy');
   spriteSources.delete('player');
-  drawSprite('enemy', FALKNER_SPRITE_DATA_URL);
-  drawSprite('player', CHRIS_BACK_SPRITE_DATA_URL);
+  drawSprite('enemy', payload.trainerSprite);
+  drawSprite('player', payload.playerTrainerSprite);
 }
 
 function renderTrainerParty(payload) {
@@ -349,7 +345,7 @@ function startIntro(payload) {
     introRunning = false;
     if (!latest || resultShown) return;
     message.textContent = isTrainer
-      ? `체육관 관장 ${withParticle(latest.trainerName || '비상', ['이', '가'])} 승부를 걸어왔다!`
+      ? `${withParticle(latest.trainerClass || '트레이너', ['이', '가'])} 승부를 걸어왔다!`
       : introMessage(latest.battle.enemy.name);
     if (!isTrainer) playEnemyCry(latest);
   }, INTRO_ANIM_MS));
@@ -411,7 +407,7 @@ function render(payload) {
     : payload.battle;
   renderCombatant('player', visibleBattle.player);
   renderCombatant('enemy', visibleBattle.enemy);
-  if (payload.battleKind === 'trainer' && !introShown) drawTrainerIntroSprites();
+  if (payload.battleKind === 'trainer' && !introShown) drawTrainerIntroSprites(payload);
   else {
     drawSprite('player', payload.playerSprite);
     drawSprite('enemy', payload.enemySprite);
