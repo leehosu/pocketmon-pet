@@ -27,10 +27,13 @@ let latest = null;
 let localLock = false;
 let cryPlayed = false;
 let introShown = false;
-// 등장 대사가 떠 있는 동안에는 메뉴를 열지 않는다(원작도 대사 → 행동선택 순서).
+// 시작 연출·등장 대사가 떠 있는 동안에는 메뉴를 열지 않는다(원작도 연출 → 대사 → 행동선택).
 let menuSuppressed = false;
-let introTimer = null;
+let introRunning = false;
+let introTimers = [];
 let eventTimers = [];
+// CSS의 시작 연출 길이와 맞춰야 한다(플래시 .45s → 블라인드 .45s → 슬라이드인 .45s).
+const INTRO_ANIM_MS = 1400;
 const INTRO_HOLD_MS = 1700;
 const spriteSources = new Map();
 const battleMusic = createBattleMusic();
@@ -206,6 +209,39 @@ function renderMoves(payload) {
   setMenuOpen(!disabled && !resultShown && !menuSuppressed);
 }
 
+// 전투 개시 연출: 화면 플래시 → 블라인드 와이프 → 포켓몬 슬라이드 인 → 등장 대사 → 메뉴.
+// 연출 자체는 CSS(#screen.intro)가 돌리고, 여기서는 문구와 메뉴 타이밍만 맞춘다.
+function startIntro(payload) {
+  menuSuppressed = true;
+  introRunning = true;
+  message.textContent = '';
+  root.classList.add('intro');
+  for (const timer of introTimers) clearTimeout(timer);
+  introTimers = [];
+
+  // 슬라이드 인이 끝나는 시점 = 야생 포켓몬이 화면에 자리잡는 순간. 울음소리도 여기서.
+  introTimers.push(setTimeout(() => {
+    root.classList.remove('intro');
+    introRunning = false;
+    if (!latest || resultShown) return;
+    message.textContent = introMessage(latest.battle.enemy.name);
+    playEnemyCry(latest);
+  }, INTRO_ANIM_MS));
+
+  introTimers.push(setTimeout(() => {
+    menuSuppressed = false;
+    if (!latest || latest.battle.winner || resultShown) return;
+    message.textContent = promptMessage(latest.battle.player.name);
+    renderMoves(latest);
+  }, INTRO_ANIM_MS + INTRO_HOLD_MS));
+}
+
+function playEnemyCry(payload) {
+  if (cryPlayed || !payload?.enemyCry) return;
+  cryPlayed = true;
+  try { new Audio(payload.enemyCry).play().catch(() => {}); } catch { /* ignore */ }
+}
+
 function render(payload) {
   latest = payload;
   localLock = Boolean(payload.resolving);
@@ -221,28 +257,18 @@ function render(payload) {
   } else if (payload.battle.winner) {
     showResult(payload);
   } else {
-    // 첫 턴엔 원작처럼 등장 대사를 먼저 띄우고, 잠시 뒤 행동 선택 메뉴를 연다.
+    // 첫 턴엔 원작의 전투 개시 연출 → 등장 대사 → 행동 선택 순서를 그대로 태운다.
     if (!introShown) {
       introShown = true;
-      menuSuppressed = true;
-      message.textContent = introMessage(payload.battle.enemy.name);
-      clearTimeout(introTimer);
-      introTimer = setTimeout(() => {
-        menuSuppressed = false;
-        if (!latest || latest.battle.winner || resultShown) return;
-        message.textContent = promptMessage(latest.battle.player.name);
-        renderMoves(latest);
-      }, INTRO_HOLD_MS);
+      startIntro(payload);
     } else {
       message.textContent = promptMessage(payload.battle.player.name);
     }
     renderMoves(payload);
   }
 
-  if (!cryPlayed && payload.enemyCry) {
-    cryPlayed = true;
-    try { new Audio(payload.enemyCry).play().catch(() => {}); } catch { /* ignore */ }
-  }
+  // 시작 연출 중이면 울음소리는 포켓몬이 자리잡는 순간(startIntro)에 맞춰 재생한다.
+  if (!introRunning) playEnemyCry(payload);
 }
 
 musicButton.addEventListener('click', () => {

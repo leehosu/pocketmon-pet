@@ -90,6 +90,32 @@
       display:flex;flex-direction:column;justify-content:center;gap:.5cqh;font-size:.78em;font-weight:700}
     #move-info .kv{display:flex;justify-content:space-between;gap:.4em;font-variant-numeric:tabular-nums}
 
+    /* --- 배틀 시작 연출 --- */
+    /* 원작은 전투에 들어갈 때 화면이 몇 번 번쩍인 뒤 가로 블라인드가 열리고,
+       포켓몬이 양옆에서 미끄러져 들어온다. 그 순서를 그대로 따라간다. */
+    #transition{position:absolute;inset:0;z-index:8;pointer-events:none;display:none}
+    #screen.intro #transition{display:block}
+    #transition .flash{position:absolute;inset:0;animation:flash .45s steps(1,end) forwards}
+    @keyframes flash{
+      0%,15%   {background:#101010;opacity:1}
+      15.1%,32%{background:#f8f8f0;opacity:1}
+      32.1%,49%{background:#101010;opacity:1}
+      49.1%,66%{background:#f8f8f0;opacity:1}
+      66.1%,83%{background:#101010;opacity:1}
+      83.1%,100%{background:#101010;opacity:0}
+    }
+    #transition .blinds{position:absolute;inset:0;display:flex;flex-direction:column}
+    #transition .blinds i{flex:1;background:#101010;transform-origin:left;
+      animation:blind .45s ease-in .45s forwards}
+    #transition .blinds i:nth-child(even){transform-origin:right}
+    @keyframes blind{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+
+    /* 포켓몬과 HP박스가 양옆에서 들어온다(블라인드가 열린 뒤). */
+    #screen.intro #enemy,#screen.intro #enemy-box{animation:slide-in-right .45s ease-out .9s both}
+    #screen.intro #player,#screen.intro #player-box{animation:slide-in-left .45s ease-out .9s both}
+    @keyframes slide-in-right{from{transform:translateX(150%)}to{transform:translateX(0)}}
+    @keyframes slide-in-left{from{transform:translateX(-170%)}to{transform:translateX(0)}}
+
     /* --- 결과 패널 --- */
     #result{position:absolute;z-index:7;left:50%;top:50%;transform:translate(-50%,-50%);
       width:74%;padding:2.6cqh 2.4cqw;background:#f8f8f0;border:0.5cqh solid #101010;
@@ -117,6 +143,10 @@
 
     @media(prefers-reduced-motion:reduce){
       .damage{animation:none}.bar>span{transition:none}#cursor{animation:none}
+      /* 연출을 끄되 진행은 막지 않는다 — 시작 시퀀스 타이밍은 JS가 따로 잡는다. */
+      #screen.intro #transition{display:none}
+      #screen.intro #enemy,#screen.intro #enemy-box,
+      #screen.intro #player,#screen.intro #player-box{animation:none}
     }
   </style>
 </head>
@@ -160,6 +190,11 @@
         <div class="kv"><span>PP</span><b id="info-pp">—</b></div>
         <div class="kv"><span>위력</span><b id="info-power">—</b></div>
       </div>
+    </div>
+
+    <div id="transition" aria-hidden="true">
+      <div class="flash"></div>
+      <div class="blinds"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
     </div>
 
     <section id="result" aria-live="assertive" hidden>
