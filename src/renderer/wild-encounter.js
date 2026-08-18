@@ -1,10 +1,13 @@
 // AI-GENERATED: 투명 야생 조우 창의 스프라이트, 체류 시간, 클릭을 처리한다.
 import { loadSpriteCutout } from './sprite-alpha.js';
+import { withParticle } from './battle-view.js';
 
 const button = document.getElementById('wild');
 const canvas = document.getElementById('sprite');
 const context = canvas.getContext('2d');
-const label = document.getElementById('label');
+const name = document.getElementById('name');
+const level = document.getElementById('level');
+const message = document.getElementById('message');
 const life = document.getElementById('life-fill');
 let encounter = null;
 let startedAt = 0;
@@ -34,7 +37,9 @@ button.addEventListener('click', () => {
 window.pkmn?.onWildState?.((payload) => {
   encounter = payload;
   startedAt = Date.now();
-  label.textContent = `야생 ${payload.name}  Lv.${payload.level}`;
+  name.textContent = payload.name;
+  level.textContent = `Lv.${payload.level}`;
+  message.textContent = `앗! 야생 ${withParticle(payload.name, ['이', '가'])} 나타났다!`;
   drawSprite(payload.sprite);
   if (!audioPlayed && payload.cry) {
     audioPlayed = true;

@@ -3,6 +3,10 @@
 // 하단 텍스트 박스, 기술 선택 시 텍스트 박스를 메뉴가 대체.
 import { loadSpriteCutout } from './sprite-alpha.js';
 import { createBattleMusic } from './battle-audio.js';
+import {
+  CHRIS_BACK_SPRITE_DATA_URL,
+  FALKNER_SPRITE_DATA_URL,
+} from './trainer-sprites.js';
 import { battleResultView } from './battle-result.js';
 import { battleEventSchedule, battleTimelineDuration } from '../core/battle-timeline.js';
 import {
@@ -14,6 +18,11 @@ const message = document.getElementById('message');
 const textbox = document.getElementById('textbox');
 const menu = document.getElementById('menu');
 const moveList = document.getElementById('move-list');
+const commandMenu = document.getElementById('command-menu');
+const commandPrompt = document.getElementById('command-prompt');
+const fightButton = document.getElementById('fight');
+const partyButton = document.getElementById('party-command');
+const packButton = document.getElementById('pack-command');
 const infoType = document.getElementById('info-type');
 const infoPp = document.getElementById('info-pp');
 const infoPower = document.getElementById('info-power');
@@ -24,6 +33,7 @@ const resultPanel = document.getElementById('result');
 const resultTitle = document.getElementById('result-title');
 const resultXp = document.getElementById('result-xp');
 const resultDetail = document.getElementById('result-detail');
+const trainerParty = document.getElementById('trainer-party');
 
 let latest = null;
 let localLock = false;
@@ -41,6 +51,9 @@ const spriteSources = new Map();
 const battleMusic = createBattleMusic();
 let resultShown = false;
 let musicMuted = false;
+let lastOpponentSequence = null;
+let menuMode = 'text';
+let commandMessageTimer = null;
 
 async function ensureBattleMusic() {
   if (musicMuted || latest?.battle?.winner) return false;
@@ -59,9 +72,33 @@ function updateMusicButton() {
   musicButton.setAttribute('aria-label', musicButton.title);
 }
 
-function setMenuOpen(open) {
-  menu.classList.toggle('open', open);
-  textbox.classList.toggle('hidden', open);
+function showTextBox() {
+  menuMode = 'text';
+  menu.classList.remove('open');
+  commandMenu.classList.remove('open');
+  textbox.classList.remove('hidden');
+}
+
+function showCommandMenu(payload = latest) {
+  if (!payload || localLock || payload.resolving || payload.battle.winner || menuSuppressed || resultShown) {
+    showTextBox();
+    return;
+  }
+  menuMode = 'command';
+  menu.classList.remove('open');
+  textbox.classList.add('hidden');
+  commandMenu.classList.add('open');
+  commandPrompt.textContent = `${payload.battle.player.name}은\n무엇을 할까?`;
+  requestAnimationFrame(() => fightButton.focus());
+}
+
+function showMoveMenu() {
+  if (!latest || localLock || latest.resolving || latest.battle.winner || menuSuppressed || resultShown) return;
+  menuMode = 'moves';
+  commandMenu.classList.remove('open');
+  textbox.classList.add('hidden');
+  menu.classList.add('open');
+  requestAnimationFrame(() => moveList.querySelector('button:not(:disabled)')?.focus());
 }
 
 function showResult(payload) {
@@ -73,7 +110,8 @@ function showResult(payload) {
   resultXp.textContent = view.xpText;
   resultDetail.textContent = view.detail;
   resultPanel.hidden = false;
-  setMenuOpen(false);
+  menu.classList.remove('open');
+  commandMenu.classList.remove('open');
   textbox.classList.add('hidden');
   if (view.won) battleMusic.playVictory().catch(() => {});
   else battleMusic.stopLoop();
@@ -101,14 +139,48 @@ async function drawSprite(key, src) {
     const context = elements.canvas.getContext('2d');
     context.clearRect(0, 0, elements.canvas.width, elements.canvas.height);
     context.imageSmoothingEnabled = false;
-    context.drawImage(sprite, 0, 0, elements.canvas.width, elements.canvas.height);
+    const sourceWidth = sprite.naturalWidth || sprite.width;
+    const sourceHeight = sprite.naturalHeight || sprite.height;
+    const scale = Math.min(1, elements.canvas.width / sourceWidth, elements.canvas.height / sourceHeight);
+    const width = Math.round(sourceWidth * scale);
+    const height = Math.round(sourceHeight * scale);
+    context.drawImage(
+      sprite,
+      Math.round((elements.canvas.width - width) / 2),
+      elements.canvas.height - height,
+      width,
+      height,
+    );
   } catch { /* 데이터 준비 실패 시 텍스트/HP 전투는 유지 */ }
+}
+
+function drawTrainerIntroSprites() {
+  spriteSources.delete('enemy');
+  spriteSources.delete('player');
+  drawSprite('enemy', FALKNER_SPRITE_DATA_URL);
+  drawSprite('player', CHRIS_BACK_SPRITE_DATA_URL);
+}
+
+function renderTrainerParty(payload) {
+  const isTrainer = payload.battleKind === 'trainer';
+  trainerParty.hidden = !isTrainer;
+  trainerParty.replaceChildren();
+  if (!isTrainer) return;
+  for (let index = 0; index < payload.trainerTeamSize; index += 1) {
+    const ball = document.createElement('span');
+    ball.className = 'party-ball';
+    if (index < payload.trainerTeamIndex) ball.classList.add('defeated');
+    if (index === payload.trainerTeamIndex) ball.classList.add('active');
+    trainerParty.appendChild(ball);
+  }
 }
 
 function renderCombatant(key, data) {
   const elements = combatantElements(key);
   // 원작 HP박스는 이름과 수치를 나눠 표시한다(적은 수치 비공개 — CSS에서 숨김).
-  elements.name.textContent = key === 'enemy' ? `야생 ${data.name}` : data.name;
+  elements.name.textContent = key === 'enemy' && latest?.battleKind !== 'trainer'
+    ? `야생 ${data.name}`
+    : data.name;
   elements.level.textContent = `Lv.${data.level}`;
   renderCombatantHp(key, data.hp, data.maxHp);
 }
@@ -187,7 +259,7 @@ function damageFloat(event) {
 function playEvents(events) {
   for (const timer of eventTimers) clearTimeout(timer);
   eventTimers = [];
-  setMenuOpen(false); // 연출 중에는 원작처럼 텍스트 박스를 보여준다
+  showTextBox(); // 연출 중에는 원작처럼 텍스트 박스를 보여준다
   battleEventSchedule(events).forEach(({ event, at }) => {
     eventTimers.push(setTimeout(() => {
       const text = eventText(event);
@@ -209,7 +281,11 @@ function playEvents(events) {
   }, timelineEnd));
   if (latest.battle.winner) {
     eventTimers.push(setTimeout(() => {
-      showResult(latest);
+      if (latest.trainerHasNext) {
+        message.textContent = `${withParticle(latest.trainerName || '관장', ['은', '는'])} 다음 포켓몬을 준비한다!`;
+      } else {
+        showResult(latest);
+      }
     }, timelineEnd + 120));
   }
 }
@@ -223,6 +299,9 @@ function showMoveInfo(move) {
 function renderMoves(payload) {
   moveList.replaceChildren();
   const disabled = localLock || payload.resolving || Boolean(payload.battle.winner);
+  fightButton.disabled = disabled;
+  partyButton.disabled = disabled;
+  packButton.disabled = disabled;
   runButton.disabled = disabled;
   const model = moveMenuModel(payload.playerMoves, payload.battle.player.moves);
   showMoveInfo(model[0]);
@@ -246,8 +325,9 @@ function renderMoves(payload) {
     });
     moveList.appendChild(button);
   }
-  // 내 차례일 때만 메뉴를 연다. 아니면 텍스트 박스가 보인다(원작과 동일).
-  setMenuOpen(!disabled && !resultShown && !menuSuppressed);
+  if (disabled || resultShown || menuSuppressed) showTextBox();
+  else if (menuMode === 'moves') showMoveMenu();
+  else showCommandMenu(payload);
 }
 
 // 전투 개시 연출: 화면 플래시 → 블라인드 와이프 → 포켓몬 슬라이드 인 → 등장 대사 → 메뉴.
@@ -255,26 +335,61 @@ function renderMoves(payload) {
 function startIntro(payload) {
   menuSuppressed = true;
   introRunning = true;
+  showTextBox();
   message.textContent = '';
   root.classList.add('intro');
   for (const timer of introTimers) clearTimeout(timer);
   introTimers = [];
 
   // 슬라이드 인이 끝나는 시점 = 야생 포켓몬이 화면에 자리잡는 순간. 울음소리도 여기서.
+  const isTrainer = payload.battleKind === 'trainer';
+  root.classList.toggle('trainer-intro', isTrainer);
   introTimers.push(setTimeout(() => {
     root.classList.remove('intro');
     introRunning = false;
     if (!latest || resultShown) return;
-    message.textContent = introMessage(latest.battle.enemy.name);
-    playEnemyCry(latest);
+    message.textContent = isTrainer
+      ? `체육관 관장 ${withParticle(latest.trainerName || '비상', ['이', '가'])} 승부를 걸어왔다!`
+      : introMessage(latest.battle.enemy.name);
+    if (!isTrainer) playEnemyCry(latest);
   }, INTRO_ANIM_MS));
+
+  if (isTrainer) {
+    introTimers.push(setTimeout(() => {
+      if (!latest || resultShown) return;
+      root.classList.remove('trainer-intro');
+      drawSprite('player', latest.playerSprite);
+      drawSprite('enemy', latest.enemySprite);
+      message.textContent = `${withParticle(latest.trainerName || '비상', ['은', '는'])} ${withParticle(latest.battle.enemy.name, ['을', '를'])} 내보냈다!`;
+      playEnemyCry(latest);
+    }, INTRO_ANIM_MS + INTRO_HOLD_MS));
+  }
 
   introTimers.push(setTimeout(() => {
     menuSuppressed = false;
     if (!latest || latest.battle.winner || resultShown) return;
     message.textContent = promptMessage(latest.battle.player.name);
     renderMoves(latest);
-  }, INTRO_ANIM_MS + INTRO_HOLD_MS));
+  }, INTRO_ANIM_MS + INTRO_HOLD_MS * (isTrainer ? 2 : 1)));
+}
+
+function startOpponentSwitch(payload) {
+  menuSuppressed = true;
+  cryPlayed = false;
+  showTextBox();
+  root.classList.remove('opponent-switch');
+  void root.offsetWidth;
+  root.classList.add('opponent-switch');
+  drawSprite('enemy', payload.enemySprite);
+  message.textContent = `${withParticle(payload.trainerName || '비상', ['은', '는'])} ${withParticle(payload.battle.enemy.name, ['을', '를'])} 내보냈다!`;
+  playEnemyCry(payload);
+  introTimers.push(setTimeout(() => {
+    root.classList.remove('opponent-switch');
+    menuSuppressed = false;
+    if (!latest || latest.battle.winner || resultShown) return;
+    message.textContent = promptMessage(latest.battle.player.name);
+    renderMoves(latest);
+  }, 1700));
 }
 
 function playEnemyCry(payload) {
@@ -284,17 +399,30 @@ function playEnemyCry(payload) {
 }
 
 function render(payload) {
+  const opponentChanged = lastOpponentSequence != null
+    && payload.opponentSequence !== lastOpponentSequence;
+  lastOpponentSequence = payload.opponentSequence;
   latest = payload;
   localLock = Boolean(payload.resolving);
+  close.hidden = payload.canRun === false;
   root.classList.toggle('player-front-fallback', !payload.playerSpriteIsBack);
   const visibleBattle = payload.events?.length && payload.previousBattle
     ? payload.previousBattle
     : payload.battle;
   renderCombatant('player', visibleBattle.player);
   renderCombatant('enemy', visibleBattle.enemy);
-  drawSprite('player', payload.playerSprite);
-  drawSprite('enemy', payload.enemySprite);
+  if (payload.battleKind === 'trainer' && !introShown) drawTrainerIntroSprites();
+  else {
+    drawSprite('player', payload.playerSprite);
+    drawSprite('enemy', payload.enemySprite);
+  }
+  renderTrainerParty(payload);
   ensureBattleMusic();
+
+  if (opponentChanged) {
+    startOpponentSwitch(payload);
+    return;
+  }
 
   if (payload.events?.length) {
     playEvents(payload.events);
@@ -327,12 +455,42 @@ musicButton.addEventListener('click', () => {
   if (!musicMuted) ensureBattleMusic();
 });
 
+fightButton.addEventListener('click', () => {
+  if (fightButton.disabled || !latest) return;
+  renderMoves(latest);
+  showMoveMenu();
+});
+
+function showCommandMessage(text, holdMs = 900) {
+  if (commandMessageTimer) clearTimeout(commandMessageTimer);
+  showTextBox();
+  message.textContent = text;
+  commandMessageTimer = setTimeout(() => {
+    commandMessageTimer = null;
+    if (!latest || resultShown) return;
+    message.textContent = promptMessage(latest.battle.player.name);
+    showCommandMenu(latest);
+  }, holdMs);
+}
+
+partyButton.addEventListener('click', () => {
+  if (!partyButton.disabled) showCommandMessage('지금은 포켓몬을 바꿀 수 없다!');
+});
+
+packButton.addEventListener('click', () => {
+  if (!packButton.disabled) showCommandMessage('지금은 도구를 사용할 수 없다!');
+});
+
 runButton.addEventListener('click', async () => {
   if (runButton.disabled || !latest) return;
+  if (latest.canRun === false) {
+    showCommandMessage('트레이너 배틀에서는 도망칠 수 없다!', 1100);
+    return;
+  }
   const battleId = latest.battleId;
   localLock = true;
   runButton.disabled = true;
-  setMenuOpen(false);
+  showTextBox();
   message.textContent = '무사히 도망쳤다!';
   await battleMusic.playRun();
   setTimeout(() => window.pkmn?.leaveBattle?.(battleId), 700);
@@ -341,11 +499,12 @@ runButton.addEventListener('click', async () => {
 window.addEventListener('pointerdown', ensureBattleMusic, { passive: true });
 
 close.addEventListener('click', () => {
-  if (latest) window.pkmn?.leaveBattle?.(latest.battleId);
+  if (latest?.canRun !== false) window.pkmn?.leaveBattle?.(latest.battleId);
 });
 window.addEventListener('keydown', (event) => {
   ensureBattleMusic();
-  if (event.key === 'Escape' && latest) window.pkmn?.leaveBattle?.(latest.battleId);
+  if (event.key === 'Escape' && menuMode === 'moves') showCommandMenu(latest);
+  if (event.key.toLowerCase() === 'm') musicButton.click();
 });
 window.addEventListener('beforeunload', () => battleMusic.stop());
 window.pkmn?.onBattleState?.(render);

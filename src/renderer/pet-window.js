@@ -145,6 +145,7 @@ if (typeof window !== 'undefined') {
   const statusEl = document.getElementById('status');
   const detailEl = document.getElementById('detail');
   const alertEl = document.getElementById('alert'); // 부화/진화 "!" 배지
+  const badgesEl = document.getElementById('badges');
 
   let latest = null; // 마지막으로 수신한 { state, changes, activity, command }
 
@@ -220,6 +221,7 @@ if (typeof window !== 'undefined') {
       if (changes.hatched) triggerReact('부화!');
       else if (changes.evolved) triggerReact('진화!');
       else if (changes.leveledUp) triggerReact('Lv↑');
+      else if (changes.badgeEarned) triggerReact(`${changes.badgeEarned}!`);
       // 부화/진화 순간에도 울음소리(진화면 새 단계 소리 — currentCry가 위에서 갱신됨)
       if (changes.hatched || changes.evolved) playCry();
     }
@@ -232,8 +234,19 @@ if (typeof window !== 'undefined') {
     }
 
     if (state) renderHud(state);
+    if (state) renderBadges(state);
     if (detailOpen) renderDetail(); // 상세 패널이 열려 있으면 최신 상태로 갱신
     updateAlert();
+  }
+
+  function renderBadges(state) {
+    badgesEl.replaceChildren();
+    if (!(state.gymBadges || []).includes('zephyr')) return;
+    const badge = document.createElement('span');
+    badge.className = 'zephyr-badge';
+    badge.title = '윙배지';
+    badge.textContent = 'W';
+    badgesEl.appendChild(badge);
   }
 
   function renderHud(state) {
@@ -302,6 +315,7 @@ if (typeof window !== 'undefined') {
       `<div class="d-row"><span>총 경험치</span><b>${d.totalXp} XP</b></div>`,
       `<div class="d-row"><span>진화</span><b>${d.evolveText}</b></div>`,
       `<div class="d-row"><span>오늘 획득</span><b>${d.dailyXp}/${d.dailyCap} XP</b></div>`,
+      `<div class="d-row"><span>배지</span><b>${(state.gymBadges || []).includes('zephyr') ? '윙배지' : '—'}</b></div>`,
       `<div class="d-skills-label">기술 (클릭 → 화면 이펙트)</div>`,
       `<div class="d-skills">${skillBtns}</div>`,
     ].join('');

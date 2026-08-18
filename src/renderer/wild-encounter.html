@@ -3,25 +3,46 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>야생 포켓몬</title>
   <style>
     *{box-sizing:border-box}
     html,body{width:100%;height:100%;margin:0;background:transparent;overflow:hidden}
-    body{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#fff;user-select:none}
-    #wild{position:relative;width:100%;height:100%;border:0;padding:0;background:transparent;cursor:pointer}
-    #sprite{position:absolute;left:42px;top:18px;width:96px;height:96px;image-rendering:pixelated;filter:drop-shadow(0 4px 2px rgba(0,0,0,.34));animation:appear .55s steps(5,end),hover 1.2s ease-in-out .55s infinite}
-    #label{position:absolute;left:10px;right:10px;bottom:20px;min-height:30px;padding:6px 8px;background:rgba(255,249,211,.96);border:2px solid #283126;border-radius:4px;color:#172018;font-size:11px;font-weight:800;text-align:center;box-shadow:0 2px 0 rgba(0,0,0,.28)}
-    #life{position:absolute;left:18px;right:18px;bottom:10px;height:4px;background:rgba(23,32,24,.42);border:1px solid rgba(23,32,24,.7)}
-    #life-fill{display:block;width:100%;height:100%;background:#e2b928;transform-origin:left center}
-    @keyframes appear{0%{opacity:0;transform:scale(.35) translateY(18px)}100%{opacity:1;transform:scale(1) translateY(0)}}
-    @keyframes hover{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
-    @media(prefers-reduced-motion:reduce){#sprite{animation:none}}
+    body{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#181818;user-select:none}
+    #wild{position:relative;width:100%;height:100%;border:0;padding:7px;background:transparent;color:#181818;cursor:pointer}
+    #screen{position:relative;width:100%;height:100%;overflow:hidden;background:#f8f8f0;border:4px solid #101010;
+      box-shadow:0 6px 0 rgba(0,0,0,.33)}
+    #field{position:absolute;left:0;right:0;top:0;height:70%;background:#f8f8f0}
+    #platform{position:absolute;right:13px;bottom:13px;width:112px;height:20px;border:3px solid #101010;
+      border-radius:50%;background:#d8e8c0}
+    #sprite{position:absolute;right:18px;bottom:17px;width:108px;height:108px;image-rendering:pixelated;
+      filter:drop-shadow(0 4px 2px rgba(0,0,0,.25));animation:appear .55s steps(5,end)}
+    #namebox{position:absolute;z-index:2;left:7px;top:10px;width:126px;padding:6px 7px 5px;border:3px solid #101010;
+      background:#f8f8f0;font-size:10px;font-weight:900;line-height:1.1}
+    #level{float:right;font-size:9px}
+    #namebox::after{content:'';display:block;margin-top:5px;width:78%;border-bottom:3px solid #101010}
+    #textbox{position:absolute;left:0;right:0;bottom:0;height:31%;padding:13px 15px;background:#f8f8f0;
+      border-top:4px solid #101010;font-size:10px;line-height:1.4;font-weight:900;text-align:left}
+    #textbox::before{content:'';position:absolute;inset:5px;border:2px solid #4b5940;pointer-events:none}
+    #message{position:relative;z-index:1}
+    #cursor{position:absolute;right:13px;bottom:8px;animation:blink .8s steps(1,end) infinite}
+    #life{position:absolute;z-index:3;left:8px;right:8px;bottom:4px;height:3px;background:#b9bba6}
+    #life-fill{display:block;width:100%;height:100%;background:#d2a72e;transform-origin:left center}
+    @keyframes appear{0%{opacity:0;transform:translateX(55px)}100%{opacity:1;transform:translateX(0)}}
+    @keyframes blink{50%{opacity:0}}
+    @media(prefers-reduced-motion:reduce){#sprite,#cursor{animation:none}}
   </style>
 </head>
 <body>
   <button id="wild" type="button" title="야생 포켓몬과 전투">
-    <canvas id="sprite" width="128" height="128"></canvas>
-    <span id="label">야생 포켓몬</span>
-    <span id="life"><span id="life-fill"></span></span>
+    <main id="screen">
+      <section id="field">
+        <div id="namebox"><span id="name">야생 포켓몬</span><span id="level">Lv.?</span></div>
+        <div id="platform"></div>
+        <canvas id="sprite" width="128" height="128"></canvas>
+      </section>
+      <div id="textbox"><span id="message">앗! 야생 포켓몬이 나타났다!</span><span id="cursor">▼</span></div>
+      <span id="life"><span id="life-fill"></span></span>
+    </main>
   </button>
   <script type="module" src="./wild-encounter.js"></script>
 </body>

@@ -42,6 +42,17 @@ import {
 import { chooseWildEncounter } from '../core/wild-catalog.js';
 import { prepareWildPokemon } from './wild-service.js';
 import { battleWindowBounds } from '../core/battle-window-bounds.js';
+import { gymLeaderWindowBounds } from '../core/gym-leader-window-bounds.js';
+import {
+  FALKNER_CHALLENGE,
+  FALKNER_APPEARANCE_MS,
+  FALKNER_LOSS_RETRY_MS,
+  FALKNER_RETRY_MS,
+  awardZephyrBadge,
+  canChallengeFalkner,
+  falknerAppearanceDelayMs,
+  trainerBattleExperience,
+} from '../core/gym-challenge.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -58,11 +69,13 @@ const DETAIL_HEIGHT = 320;
 const EFFECT_DURATION_MS = 2800;
 const POKEGOLD_EFFECT_DURATION_MS = 4300;
 const RESULT_HOLD_MS = 3000;
-const WILD_WINDOW_WIDTH = 180;
-const WILD_WINDOW_HEIGHT = 190;
+const WILD_WINDOW_WIDTH = 220;
+const WILD_WINDOW_HEIGHT = 210;
+const GYM_LEADER_WINDOW_WIDTH = 290;
+const GYM_LEADER_WINDOW_HEIGHT = 170;
 // AI-GENERATED: 작업 화면을 가리지 않는 단일 플로팅 배틀 스테이지 크기.
-const BATTLE_WINDOW_WIDTH = 600;
-const BATTLE_WINDOW_HEIGHT = 460;
+const BATTLE_WINDOW_WIDTH = 500;
+const BATTLE_WINDOW_HEIGHT = 452;
 const EFFECT_TYPES = [
   'leaf', 'leaf_swirl',
   'fire', 'fire_breath',
@@ -101,6 +114,7 @@ const MANUAL_MOVE_COOLDOWN_MS = 1500;
 let mainWindow = null;
 let effectWin = null;
 let wildWindow = null;
+let gymLeaderWindow = null;
 let battleWindow = null;
 let tray = null;
 let intervalId = null;
@@ -111,9 +125,13 @@ let lastCrySig = null; // 렌더러에 마지막으로 보낸 울음소리(종_�
 let lastMovesSig = null; // 렌더러에 마지막으로 보낸 기술목록(종) 시그니처
 let nextEncounterAt = 0;
 let currentEncounter = null;
+let currentGymEncounter = null;
 let currentBattle = null;
 let encounterPreparing = false;
+let gymLeaderPreparing = false;
 let encounterExpiryTimer = null;
+let gymLeaderExpiryTimer = null;
+let nextGymLeaderAt = 0;
 let battleTurnTimer = null;
 let battleEffectTimers = [];
 const pendingSpriteLines = new Set();
@@ -606,6 +624,146 @@ function refreshCustomSpritesIfChanged() {
   return loadCustomSprites(dir);
 }
 
+// ---- AI-GENERATED: 조건 달성 시 펫 옆에 직접 등장하는 도라지시티 관장 비상 ----
+function scheduleNextGymLeader(now = Date.now(), delay = falknerAppearanceDelayMs(Math.random)) {
+  nextGymLeaderAt = canChallengeFalkner(state) ? now + Math.max(0, delay) : 0;
+}
+
+function clearGymLeaderExpiry() {
+  if (gymLeaderExpiryTimer) clearTimeout(gymLeaderExpiryTimer);
+  gymLeaderExpiryTimer = null;
+}
+
+function closeGymLeaderWindow() {
+  clearGymLeaderExpiry();
+  const win = gymLeaderWindow;
+  gymLeaderWindow = null;
+  if (win && !win.isDestroyed()) win.close();
+}
+
+function finishUnclaimedGymLeader() {
+  closeGymLeaderWindow();
+  currentGymEncounter = null;
+  scheduleNextGymLeader(Date.now(), FALKNER_RETRY_MS);
+}
+
+function sendGymLeaderState() {
+  if (!gymLeaderWindow || gymLeaderWindow.isDestroyed() || !currentGymEncounter) return;
+  gymLeaderWindow.webContents.send('gym-leader-state', {
+    id: currentGymEncounter.id,
+    leaderName: FALKNER_CHALLENGE.name,
+    badgeName: FALKNER_CHALLENGE.badgeName,
+    expiresAt: currentGymEncounter.expiresAt,
+    busy: gymLeaderPreparing,
+    error: currentGymEncounter.error || null,
+  });
+}
+
+function createGymLeaderWindow(encounter) {
+  const display = mainWindow && !mainWindow.isDestroyed()
+    ? screen.getDisplayMatching(mainWindow.getBounds())
+    : screen.getPrimaryDisplay();
+  const petBounds = mainWindow && !mainWindow.isDestroyed()
+    ? mainWindow.getBounds()
+    : { x: display.workArea.x, y: display.workArea.y, width: WINDOW_SIZE, height: WINDOW_HEIGHT };
+  const bounds = gymLeaderWindowBounds(display.workArea, petBounds, {
+    width: GYM_LEADER_WINDOW_WIDTH,
+    height: GYM_LEADER_WINDOW_HEIGHT,
+  });
+  const win = new BrowserWindow({
+    x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+    transparent: true, backgroundColor: '#00000000', frame: false, hasShadow: false,
+    resizable: false, movable: true, minimizable: false, maximizable: false,
+    skipTaskbar: true,
+    webPreferences: {
+      preload: join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  gymLeaderWindow = win;
+  win.setAlwaysOnTop(true, 'floating');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.loadFile(join(__dirname, '../renderer/gym-leader-window.html'));
+  win.webContents.once('did-finish-load', sendGymLeaderState);
+  win.on('closed', () => {
+    if (gymLeaderWindow !== win) return;
+    gymLeaderWindow = null;
+    clearGymLeaderExpiry();
+    if (currentGymEncounter && !currentBattle) {
+      currentGymEncounter = null;
+      scheduleNextGymLeader(Date.now(), FALKNER_RETRY_MS);
+    }
+  });
+  gymLeaderExpiryTimer = setTimeout(() => {
+    if (currentGymEncounter?.id === encounter.id && !currentBattle) finishUnclaimedGymLeader();
+  }, Math.max(0, encounter.expiresAt - Date.now()));
+}
+
+function prepareAndShowFalkner(force = false) {
+  if (encounterPreparing || gymLeaderPreparing || currentGymEncounter || currentEncounter || currentBattle || !state?.hatched) return;
+  if (!force && !canChallengeFalkner(state)) return;
+  nextGymLeaderAt = 0;
+  currentGymEncounter = {
+    id: randomUUID(),
+    expiresAt: Date.now() + FALKNER_APPEARANCE_MS,
+    error: null,
+  };
+  createGymLeaderWindow(currentGymEncounter);
+}
+
+async function acceptFalknerChallenge(encounterId) {
+  if (!currentGymEncounter || currentGymEncounter.id !== encounterId || currentBattle || gymLeaderPreparing) return;
+  if (Date.now() >= currentGymEncounter.expiresAt) {
+    finishUnclaimedGymLeader();
+    return;
+  }
+  gymLeaderPreparing = true;
+  currentGymEncounter.error = null;
+  sendGymLeaderState();
+  const acceptedId = currentGymEncounter.id;
+  try {
+    const team = await Promise.all(FALKNER_CHALLENGE.team.map(async (member) => {
+      const prepared = await prepareWildPokemon({
+        cacheDir: dataDir(),
+        speciesId: member.speciesId,
+        level: member.level,
+      });
+      return {
+        ...prepared,
+        ...member,
+        dvs: { ...FALKNER_CHALLENGE.dvs },
+        moveIds: [...member.moveIds],
+      };
+    }));
+    if (!currentGymEncounter || currentGymEncounter.id !== acceptedId || currentBattle) return;
+    const anchorBounds = gymLeaderWindow && !gymLeaderWindow.isDestroyed()
+      ? gymLeaderWindow.getBounds()
+      : mainWindow?.getBounds();
+    closeGymLeaderWindow();
+    currentGymEncounter = null;
+    startTrainerBattle(team, anchorBounds);
+  } catch {
+    if (currentGymEncounter?.id === acceptedId) {
+      currentGymEncounter.error = '포켓몬을 준비하지 못했습니다. 잠시 뒤 다시 도전해 주세요.';
+    }
+  } finally {
+    gymLeaderPreparing = false;
+    sendGymLeaderState();
+  }
+}
+
+function runGymLeaderScheduler(now = Date.now()) {
+  if (!canChallengeFalkner(state)) {
+    nextGymLeaderAt = 0;
+    return;
+  }
+  if (currentGymEncounter || currentEncounter || currentBattle || encounterPreparing || gymLeaderPreparing) return;
+  if (!nextGymLeaderAt) scheduleNextGymLeader(now);
+  if (now >= nextGymLeaderAt) prepareAndShowFalkner();
+}
+
 // ---- AI-GENERATED: 야생 조우와 2세대 전투 창 수명주기 ----
 function scheduleNextEncounter(now = Date.now()) {
   nextEncounterAt = state?.hatched ? now + nextEncounterDelayMs(Math.random) : 0;
@@ -684,7 +842,7 @@ function createWildWindow(encounter) {
 }
 
 async function prepareAndShowWildEncounter(force = false) {
-  if (encounterPreparing || currentEncounter || currentBattle || !state?.hatched) return;
+  if (encounterPreparing || currentEncounter || currentGymEncounter || currentBattle || !state?.hatched) return;
   const now = Date.now();
   const cooldownUntil = state.battleProfile?.encounterCooldownUntil || 0;
   if (!force && !canScheduleEncounter({ hatched: true, cooldownUntil }, now)) return;
@@ -694,7 +852,7 @@ async function prepareAndShowWildEncounter(force = false) {
     const selected = chooseWildEncounter(state.level || 1, Math.random);
     if (!selected) throw new Error('No eligible Gold encounter');
     const prepared = await prepareWildPokemon({ cacheDir: dataDir(), ...selected });
-    if (currentEncounter || currentBattle || !state?.hatched) return;
+    if (currentEncounter || currentGymEncounter || currentBattle || !state?.hatched) return;
     const duration = wildAppearanceDurationMs(Math.random);
     currentEncounter = {
       id: randomUUID(),
@@ -711,7 +869,7 @@ async function prepareAndShowWildEncounter(force = false) {
 }
 
 function runEncounterScheduler(now = Date.now()) {
-  if (!state?.hatched || currentEncounter || currentBattle || encounterPreparing) return;
+  if (!state?.hatched || currentEncounter || currentGymEncounter || currentBattle || encounterPreparing) return;
   const cooldownUntil = state.battleProfile?.encounterCooldownUntil || 0;
   if (!canScheduleEncounter({ hatched: true, cooldownUntil }, now)) {
     nextEncounterAt = 0;
@@ -739,6 +897,15 @@ function battlePayload(events = [], previousBattle = null) {
     playerSpriteIsBack: currentBattle.playerSpriteIsBack,
     enemySprite: currentBattle.encounter.sprite,
     enemyCry: currentBattle.encounter.cry,
+    battleKind: currentBattle.kind,
+    canRun: currentBattle.canRun,
+    trainerName: currentBattle.trainerName,
+    trainerHasNext: currentBattle.kind === 'trainer'
+      && currentBattle.battle.winner === 'player'
+      && currentBattle.teamIndex < currentBattle.team.length - 1,
+    trainerTeamIndex: currentBattle.teamIndex,
+    trainerTeamSize: currentBattle.team?.length || 0,
+    opponentSequence: currentBattle.opponentSequence,
   };
 }
 
@@ -767,11 +934,16 @@ function finishBattleSession() {
   battleTurnTimer = null;
   clearBattleEffects(true);
   const win = battleWindow;
+  const wasTrainerBattle = currentBattle?.kind === 'trainer';
+  const trainerWon = wasTrainerBattle && currentBattle?.battle.winner === 'player';
   battleWindow = null;
   restorePetWindow();
   currentBattle = null;
   if (win && !win.isDestroyed()) win.close();
   nextEncounterAt = 0;
+  if (wasTrainerBattle && !trainerWon) {
+    scheduleNextGymLeader(Date.now(), FALKNER_LOSS_RETRY_MS);
+  }
 }
 
 function createBattleWindow(anchorBounds) {
@@ -811,25 +983,26 @@ function createBattleWindow(anchorBounds) {
     if (battleTurnTimer) clearTimeout(battleTurnTimer);
     battleTurnTimer = null;
     clearBattleEffects(true);
+    const wasTrainerBattle = currentBattle?.kind === 'trainer';
+    const trainerWon = wasTrainerBattle && currentBattle?.battle.winner === 'player';
     restorePetWindow();
     currentBattle = null;
     nextEncounterAt = 0;
+    if (wasTrainerBattle && !trainerWon) {
+      scheduleNextGymLeader(Date.now(), FALKNER_LOSS_RETRY_MS);
+    }
   });
 }
 
-function startBattle(encounter) {
-  const encounterBounds = wildWindow && !wildWindow.isDestroyed()
-    ? wildWindow.getBounds()
-    : null;
-  state = ensureBattleProfile(state, Math.random);
+function createBattleForEncounter(encounter, carriedPlayer = null) {
   const line = dexLine(state.species);
   const playerSpeciesId = line[state.stage || 0];
   const roster = getSpeciesByKey(state.species);
   const playerName = roster?.stages[state.stage || 0]?.name || '포켓몬';
   const playerMoves = gen2SkillsForStage(state.species, state.stage || 0);
   const playerBackSprite = backSpriteDataUrl(state.species, state.stage || 0);
-  const enemyDvs = createBattleProfile(Math.random).dvs;
-  const battle = createGen2Battle({
+  const enemyDvs = encounter.dvs || createBattleProfile(Math.random).dvs;
+  let battle = createGen2Battle({
     player: {
       speciesId: playerSpeciesId,
       name: playerName,
@@ -847,13 +1020,44 @@ function startBattle(encounter) {
       moves: encounter.moveIds,
     },
   });
-  currentBattle = {
-    id: randomUUID(),
-    encounter,
+  if (carriedPlayer) {
+    battle = {
+      ...battle,
+      player: {
+        ...battle.player,
+        hp: Math.min(battle.player.maxHp, Math.max(1, carriedPlayer.hp)),
+        moves: carriedPlayer.moves.map((move) => ({ ...move })),
+        status: carriedPlayer.status,
+        confusionTurns: carriedPlayer.confusionTurns,
+        lightScreenTurns: carriedPlayer.lightScreenTurns,
+        stages: { ...carriedPlayer.stages },
+      },
+    };
+  }
+  return {
     battle,
     playerMoves,
     playerSprite: playerBackSprite || spriteDataUrl(state.species, state.stage || 0),
     playerSpriteIsBack: Boolean(playerBackSprite),
+  };
+}
+
+function startBattle(encounter) {
+  const encounterBounds = wildWindow && !wildWindow.isDestroyed()
+    ? wildWindow.getBounds()
+    : null;
+  state = ensureBattleProfile(state, Math.random);
+  const prepared = createBattleForEncounter(encounter);
+  currentBattle = {
+    id: randomUUID(),
+    encounter,
+    ...prepared,
+    kind: 'wild',
+    canRun: true,
+    trainerName: null,
+    team: [],
+    teamIndex: 0,
+    opponentSequence: 0,
     resolving: false,
     outcomeCommitted: false,
     reward: 0,
@@ -865,19 +1069,83 @@ function startBattle(encounter) {
   createBattleWindow(encounterBounds);
 }
 
+function startTrainerBattle(team, anchorBounds) {
+  if (!Array.isArray(team) || !team.length || currentBattle) return;
+  state = ensureBattleProfile(state, Math.random);
+  const prepared = createBattleForEncounter(team[0]);
+  currentBattle = {
+    id: randomUUID(),
+    encounter: team[0],
+    ...prepared,
+    kind: 'trainer',
+    canRun: false,
+    trainerId: FALKNER_CHALLENGE.id,
+    trainerName: FALKNER_CHALLENGE.name,
+    team,
+    teamIndex: 0,
+    opponentSequence: 0,
+    resolving: false,
+    outcomeCommitted: false,
+    reward: 0,
+    resultChanges: {},
+  };
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+  createBattleWindow(anchorBounds);
+}
+
+function trainerHasNextOpponent() {
+  return currentBattle?.kind === 'trainer'
+    && currentBattle.battle.winner === 'player'
+    && currentBattle.teamIndex < currentBattle.team.length - 1;
+}
+
+function advanceTrainerOpponent() {
+  if (!trainerHasNextOpponent()) return false;
+  const carriedPlayer = currentBattle.battle.player;
+  currentBattle.teamIndex += 1;
+  currentBattle.encounter = currentBattle.team[currentBattle.teamIndex];
+  const prepared = createBattleForEncounter(currentBattle.encounter, carriedPlayer);
+  currentBattle.battle = prepared.battle;
+  currentBattle.playerMoves = prepared.playerMoves;
+  currentBattle.playerSprite = prepared.playerSprite;
+  currentBattle.playerSpriteIsBack = prepared.playerSpriteIsBack;
+  currentBattle.opponentSequence += 1;
+  currentBattle.resolving = true;
+  sendBattleState();
+  battleTurnTimer = setTimeout(() => {
+    battleTurnTimer = null;
+    if (!currentBattle || currentBattle.kind !== 'trainer') return;
+    currentBattle.resolving = false;
+    sendBattleState();
+  }, BATTLE_ACTION_MS);
+  return true;
+}
+
 function commitBattleOutcome() {
   if (!currentBattle || currentBattle.outcomeCommitted || !currentBattle.battle.winner) return;
   currentBattle.outcomeCommitted = true;
   if (currentBattle.battle.winner === 'player') {
-    const reward = wildBattleExperience(currentBattle.encounter.speciesId, currentBattle.encounter.level);
-    state = {
-      ...state,
-      battleProfile: recordBattleVictory(state.battleProfile, currentBattle.encounter.speciesId),
-    };
+    const defeated = currentBattle.kind === 'trainer' ? currentBattle.team : [currentBattle.encounter];
+    const reward = currentBattle.kind === 'trainer'
+      ? trainerBattleExperience(defeated, wildBattleExperience)
+      : wildBattleExperience(currentBattle.encounter.speciesId, currentBattle.encounter.level);
+    let battleProfile = state.battleProfile;
+    for (const opponent of defeated) {
+      battleProfile = recordBattleVictory(battleProfile, opponent.speciesId);
+    }
+    state = { ...state, battleProfile };
     const applied = applyBattleExperience(state, reward);
     state = applied.state;
     currentBattle.reward = reward;
     currentBattle.resultChanges = { ...applied.changes, battleWon: true };
+    if (currentBattle.kind === 'trainer' && currentBattle.trainerId === FALKNER_CHALLENGE.id) {
+      state = awardZephyrBadge(state);
+      currentBattle.resultChanges = {
+        ...currentBattle.resultChanges,
+        gymWon: true,
+        badgeEarned: FALKNER_CHALLENGE.badgeName,
+      };
+    }
   } else {
     state = { ...state, battleProfile: recordBattleLoss(state.battleProfile, Date.now()) };
     currentBattle.resultChanges = { battleLost: true };
@@ -935,7 +1203,8 @@ function resolveBattleMove(payload) {
   const previousBattle = currentBattle.battle;
   const result = resolveGen2Turn(previousBattle, payload.moveSlug, Math.random);
   currentBattle.battle = result.state;
-  commitBattleOutcome();
+  const hasNextTrainerOpponent = trainerHasNextOpponent();
+  if (!hasNextTrainerOpponent) commitBattleOutcome();
   sendBattleState(result.events, previousBattle);
   const lastEffectAt = playResolvedBattleEffects(result.events);
   const timelineEnd = battleTimelineDuration(result.events);
@@ -948,6 +1217,7 @@ function resolveBattleMove(payload) {
     battleTurnTimer = null;
     if (!currentBattle) return;
     if (currentBattle.battle.winner) {
+      if (advanceTrainerOpponent()) return;
       finishBattleSession();
       return;
     }
@@ -969,6 +1239,7 @@ function runTick() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('state', result);
   }
+  runGymLeaderScheduler();
   runEncounterScheduler();
 }
 
@@ -1090,10 +1361,19 @@ app.whenReady().then(() => {
     startBattle(currentEncounter);
   });
 
+  ipcMain.on('pkmn:accept-gym-leader', (_e, encounterId) => {
+    acceptFalknerChallenge(encounterId);
+  });
+
+  ipcMain.on('pkmn:dismiss-gym-leader', (_e, encounterId) => {
+    if (currentGymEncounter?.id === encounterId && !gymLeaderPreparing) finishUnclaimedGymLeader();
+  });
+
   ipcMain.on('pkmn:battle-move', (_e, payload) => resolveBattleMove(payload));
 
   ipcMain.on('pkmn:leave-battle', (_e, battleId) => {
     if (!currentBattle || currentBattle.id !== battleId || currentBattle.outcomeCommitted) return;
+    if (!currentBattle.canRun) return;
     finishBattleSession();
   });
 
@@ -1135,6 +1415,10 @@ app.whenReady().then(() => {
 
   intervalId = setInterval(runTick, TICK_MS);
   scheduleNextEncounter();
+  scheduleNextGymLeader();
+  if (process.env.POCKETMON_FORCE_GYM === '1') {
+    setTimeout(() => prepareAndShowFalkner(true), 1_500);
+  }
   if (process.env.POCKETMON_FORCE_ENCOUNTER === '1') {
     setTimeout(() => prepareAndShowWildEncounter(true), 1500);
   }
@@ -1147,6 +1431,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (intervalId) clearInterval(intervalId);
   if (encounterExpiryTimer) clearTimeout(encounterExpiryTimer);
+  if (gymLeaderExpiryTimer) clearTimeout(gymLeaderExpiryTimer);
   if (battleTurnTimer) clearTimeout(battleTurnTimer);
   clearBattleEffects(true);
 });
