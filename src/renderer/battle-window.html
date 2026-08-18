@@ -16,7 +16,9 @@
       font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
       color:#181818;user-select:none;
       background:transparent;
+      -webkit-app-region:drag;
     }
+    button,#menu{-webkit-app-region:no-drag}
 
     /* AI-GENERATED: 데스크톱을 가리지 않는 컴팩트 플로팅 배틀 스테이지. */
     #screen{
@@ -101,6 +103,11 @@
     #move-info{width:38%;border-left:0.4cqh solid #101010;padding:1.4cqh 1.4cqw;
       display:flex;flex-direction:column;justify-content:center;gap:.5cqh;font-size:.78em;font-weight:700}
     #move-info .kv{display:flex;justify-content:space-between;gap:.4em;font-variant-numeric:tabular-nums}
+    #run{margin-top:.45cqh;padding:.4cqh .55cqw;border:.25cqh solid #101010;background:#f8f8f0;
+      color:#181818;font:700 1em ui-monospace,SFMono-Regular,Menlo,monospace;text-align:left;cursor:pointer}
+    #run::before{content:'▶';margin-right:.45em;opacity:0}
+    #run:hover:not(:disabled)::before,#run:focus-visible::before{opacity:1}
+    #run:disabled{opacity:.4;cursor:default}
 
     /* --- 배틀 시작 연출 --- */
     /* 원작은 전투에 들어갈 때 화면이 몇 번 번쩍인 뒤 가로 블라인드가 열리고,
@@ -202,6 +209,7 @@
         <div class="kv"><span>TYPE/</span><b id="info-type">—</b></div>
         <div class="kv"><span>PP</span><b id="info-pp">—</b></div>
         <div class="kv"><span>위력</span><b id="info-power">—</b></div>
+        <button id="run" type="button">도망가기</button>
       </div>
     </div>
 

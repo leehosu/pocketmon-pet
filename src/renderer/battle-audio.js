@@ -1,57 +1,66 @@
-// AI-GENERATED: 저작권 음원 없이 Web Audio로 재생하는 오리지널 8비트 전투 루프.
-export const BATTLE_BPM = 156;
+// AI-GENERATED: pret/pokegold의 3채널 야생 배틀 악보를 Web Audio로 재생한다.
+import { JOHTO_WILD_BATTLE } from './pokegold-battle-music-data.js';
 
-const LEAD = Object.freeze([
-  76, null, 79, 81, 79, 76, 74, null,
-  72, 74, 76, 79, 76, 74, 71, null,
-  76, 79, 83, 81, 79, 76, 74, 76,
-  72, 74, 71, 69, 71, 74, 76, null,
-]);
-
-const BASS = Object.freeze([
-  40, null, 40, null, 43, null, 43, null,
-  36, null, 36, null, 38, null, 38, null,
-  40, null, 40, null, 43, null, 45, null,
-  36, null, 38, null, 35, null, 38, null,
-]);
+const MASTER_VOLUME = 0.24;
+const INTRO_URL = new URL('./assets/audio/johto-wild-battle-intro.wav', import.meta.url).href;
+const LOOP_URL = new URL('./assets/audio/johto-wild-battle-loop.wav', import.meta.url).href;
+const RUN_URL = new URL('./assets/audio/battle-run.wav', import.meta.url).href;
 
 export function midiToFrequency(note) {
   return 440 * Math.pow(2, (Number(note) - 69) / 12);
 }
 
-export function battleStepAt(index) {
-  const step = ((Math.floor(Number(index) || 0) % LEAD.length) + LEAD.length) % LEAD.length;
+export function battleMusicInfo() {
   return {
-    lead: LEAD[step],
-    bass: BASS[step],
-    kick: step % 4 === 0,
-    hat: step % 2 === 1,
+    source: JOHTO_WILD_BATTLE.source,
+    tempo: JOHTO_WILD_BATTLE.tempo,
+    introFrames: JOHTO_WILD_BATTLE.channels.map((channel) => channel.introFrames),
+    loopFrames: JOHTO_WILD_BATTLE.channels.map((channel) => channel.loopFrames),
   };
 }
 
 export function createBattleMusic({
+  AudioClass = globalThis.Audio,
   AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext,
 } = {}) {
   let context = null;
   let master = null;
-  let noiseBuffer = null;
-  let timer = null;
+  let introAudio = null;
+  let loopAudio = null;
+  let runAudio = null;
   let running = false;
   let muted = false;
   let victoryPlayed = false;
-  let nextStepAt = 0;
-  let stepIndex = 0;
-  const stepDuration = 60 / BATTLE_BPM / 4;
 
   function ensureContext() {
     if (context || !AudioContextClass) return Boolean(context);
     context = new AudioContextClass();
     master = context.createGain();
-    master.gain.value = muted ? 0 : 0.14;
+    master.gain.value = muted ? 0 : MASTER_VOLUME;
     master.connect(context.destination);
-    noiseBuffer = context.createBuffer(1, Math.ceil(context.sampleRate * 0.08), context.sampleRate);
-    const noise = noiseBuffer.getChannelData(0);
-    for (let i = 0; i < noise.length; i += 1) noise[i] = Math.random() * 2 - 1;
+    return true;
+  }
+
+  function ensurePlayers() {
+    if (introAudio && loopAudio && runAudio) return true;
+    if (!AudioClass) return false;
+    introAudio = new AudioClass(INTRO_URL);
+    loopAudio = new AudioClass(LOOP_URL);
+    runAudio = new AudioClass(RUN_URL);
+    introAudio.preload = 'auto';
+    loopAudio.preload = 'auto';
+    runAudio.preload = 'auto';
+    introAudio.volume = 0.8;
+    loopAudio.volume = 0.8;
+    runAudio.volume = 0.9;
+    loopAudio.loop = true;
+    introAudio.muted = muted;
+    loopAudio.muted = muted;
+    introAudio.addEventListener('ended', () => {
+      if (!running) return;
+      loopAudio.currentTime = 0;
+      loopAudio.play().catch(() => { running = false; });
+    });
     return true;
   }
 
@@ -62,71 +71,49 @@ export function createBattleMusic({
     oscillator.type = type;
     oscillator.frequency.setValueAtTime(midiToFrequency(note), at);
     gain.gain.setValueAtTime(0.0001, at);
-    gain.gain.exponentialRampToValueAtTime(volume, at + 0.008);
+    gain.gain.exponentialRampToValueAtTime(volume, at + 0.006);
     gain.gain.exponentialRampToValueAtTime(0.0001, at + duration);
     oscillator.connect(gain).connect(master);
     oscillator.start(at);
-    oscillator.stop(at + duration + 0.02);
-  }
-
-  function kick(at) {
-    if (!context || !master) return;
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(105, at);
-    oscillator.frequency.exponentialRampToValueAtTime(42, at + 0.09);
-    gain.gain.setValueAtTime(0.12, at);
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.1);
-    oscillator.connect(gain).connect(master);
-    oscillator.start(at);
-    oscillator.stop(at + 0.11);
-  }
-
-  function hat(at) {
-    if (!context || !master || !noiseBuffer) return;
-    const source = context.createBufferSource();
-    const filter = context.createBiquadFilter();
-    const gain = context.createGain();
-    source.buffer = noiseBuffer;
-    filter.type = 'highpass';
-    filter.frequency.value = 5000;
-    gain.gain.setValueAtTime(0.025, at);
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.035);
-    source.connect(filter).connect(gain).connect(master);
-    source.start(at);
-    source.stop(at + 0.04);
-  }
-
-  function schedule() {
-    if (!running || !context) return;
-    while (nextStepAt < context.currentTime + 0.12) {
-      const step = battleStepAt(stepIndex);
-      pulse(step.lead, nextStepAt, stepDuration * 0.78, 0.052);
-      pulse(step.bass, nextStepAt, stepDuration * 0.9, 0.042, 'triangle');
-      if (step.kick) kick(nextStepAt);
-      if (step.hat) hat(nextStepAt);
-      nextStepAt += stepDuration;
-      stepIndex += 1;
-    }
+    oscillator.stop(at + duration + 0.015);
   }
 
   async function start() {
-    if (!ensureContext() || victoryPlayed) return false;
-    try { await context.resume(); } catch { return false; }
-    if (running) return true;
+    if (!ensurePlayers() || victoryPlayed) return false;
+    if (running && (!introAudio.paused || !loopAudio.paused)) return true;
     running = true;
-    nextStepAt = context.currentTime + 0.04;
-    stepIndex = 0;
-    schedule();
-    timer = setInterval(schedule, 25);
-    return true;
+    introAudio.currentTime = 0;
+    loopAudio.pause();
+    loopAudio.currentTime = 0;
+    try {
+      await introAudio.play();
+      return true;
+    } catch {
+      running = false;
+      return false;
+    }
   }
 
   function stopLoop() {
     running = false;
-    if (timer) clearInterval(timer);
-    timer = null;
+    for (const audio of [introAudio, loopAudio]) {
+      if (!audio) continue;
+      audio.pause();
+      audio.currentTime = 0;
+    }
+  }
+
+  async function playRun() {
+    stopLoop();
+    if (!ensurePlayers()) return false;
+    runAudio.currentTime = 0;
+    runAudio.muted = false;
+    try {
+      await runAudio.play();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async function playVictory() {
@@ -145,13 +132,25 @@ export function createBattleMusic({
 
   function setMuted(value) {
     muted = Boolean(value);
-    if (master && context) master.gain.setTargetAtTime(muted ? 0 : 0.14, context.currentTime, 0.02);
+    if (introAudio) introAudio.muted = muted;
+    if (loopAudio) loopAudio.muted = muted;
+    if (master && context) {
+      master.gain.setTargetAtTime(muted ? 0 : MASTER_VOLUME, context.currentTime, 0.02);
+    }
   }
 
   function stop() {
     stopLoop();
+    if (runAudio) {
+      runAudio.pause();
+      runAudio.currentTime = 0;
+    }
     if (context && context.state !== 'closed') context.close().catch(() => {});
   }
 
-  return { start, stopLoop, playVictory, setMuted, stop, isMuted: () => muted };
+  return {
+    start, stopLoop, playVictory, playRun, setMuted, stop,
+    isMuted: () => muted,
+    isPlaying: () => running,
+  };
 }

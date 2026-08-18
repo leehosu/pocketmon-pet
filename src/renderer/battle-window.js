@@ -17,6 +17,7 @@ const moveList = document.getElementById('move-list');
 const infoType = document.getElementById('info-type');
 const infoPp = document.getElementById('info-pp');
 const infoPower = document.getElementById('info-power');
+const runButton = document.getElementById('run');
 const close = document.getElementById('close');
 const musicButton = document.getElementById('music');
 const resultPanel = document.getElementById('result');
@@ -41,8 +42,15 @@ const battleMusic = createBattleMusic();
 let resultShown = false;
 let musicMuted = false;
 
-function ensureBattleMusic() {
-  if (!musicMuted && !latest?.battle?.winner) battleMusic.start().catch(() => {});
+async function ensureBattleMusic() {
+  if (musicMuted || latest?.battle?.winner) return false;
+  const started = await battleMusic.start().catch(() => false);
+  musicButton.dataset.audioState = started ? 'playing' : 'blocked';
+  if (!started) {
+    musicButton.title = '배틀 음악을 재생하려면 클릭';
+    musicButton.setAttribute('aria-label', musicButton.title);
+  }
+  return started;
 }
 
 function updateMusicButton() {
@@ -215,6 +223,7 @@ function showMoveInfo(move) {
 function renderMoves(payload) {
   moveList.replaceChildren();
   const disabled = localLock || payload.resolving || Boolean(payload.battle.winner);
+  runButton.disabled = disabled;
   const model = moveMenuModel(payload.playerMoves, payload.battle.player.moves);
   showMoveInfo(model[0]);
   for (const move of model) {
@@ -308,10 +317,25 @@ function render(payload) {
 }
 
 musicButton.addEventListener('click', () => {
+  if (!musicMuted && !battleMusic.isPlaying()) {
+    ensureBattleMusic();
+    return;
+  }
   musicMuted = !musicMuted;
   battleMusic.setMuted(musicMuted);
   updateMusicButton();
   if (!musicMuted) ensureBattleMusic();
+});
+
+runButton.addEventListener('click', async () => {
+  if (runButton.disabled || !latest) return;
+  const battleId = latest.battleId;
+  localLock = true;
+  runButton.disabled = true;
+  setMenuOpen(false);
+  message.textContent = '무사히 도망쳤다!';
+  await battleMusic.playRun();
+  setTimeout(() => window.pkmn?.leaveBattle?.(battleId), 700);
 });
 
 window.addEventListener('pointerdown', ensureBattleMusic, { passive: true });
