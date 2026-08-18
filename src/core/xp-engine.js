@@ -31,8 +31,18 @@ export function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+// 레벨 곡선의 계수. 곡선 모양(^1.5)은 그대로 두고 계수만 올려 레벨업 페이스를 유지한다.
+//
+// 일일 상한을 500 → 2,000으로 올리면서 실효 XP가 활동일당 458 → 1,060(2.31배)이 됐다.
+// 계수를 그대로 100에 두면 최종 진화가 40일 → 16일로 줄어 "키우는" 맛이 사라진다.
+// 같은 배율(2.31)을 곡선에 실어 도달 시점을 상한 500 시절로 되돌린다.
+// 실측 검증(활동일): Lv.16 14일→14일, Lv.25 27일→27일, Lv.32 40일→38일.
+//
+// 지수를 올리는 방식(^1.8 등)도 검토했으나 고레벨에서 과교정된다(Lv.32가 40일→48일).
+export const LEVEL_XP_BASE = 231;
+
 export function xpForLevel(level) {
-  return Math.floor(100 * Math.pow(level, 1.5));
+  return Math.floor(LEVEL_XP_BASE * Math.pow(level, 1.5));
 }
 
 export function levelForXp(xp) {
