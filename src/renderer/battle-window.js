@@ -4,6 +4,7 @@
 import { loadSpriteCutout } from './sprite-alpha.js';
 import { createBattleMusic } from './battle-audio.js';
 import { battleResultView } from './battle-result.js';
+import { battleEventSchedule, battleTimelineDuration } from '../core/battle-timeline.js';
 import {
   hpBarPercent, hpTone, introMessage, promptMessage, moveMenuModel, typeLabel, withParticle,
 } from './battle-view.js';
@@ -101,9 +102,28 @@ function renderCombatant(key, data) {
   // 원작 HP박스는 이름과 수치를 나눠 표시한다(적은 수치 비공개 — CSS에서 숨김).
   elements.name.textContent = key === 'enemy' ? `야생 ${data.name}` : data.name;
   elements.level.textContent = `Lv.${data.level}`;
-  elements.hp.style.width = `${hpBarPercent(data.hp, data.maxHp)}%`;
-  elements.hp.dataset.tone = hpTone(data.hp, data.maxHp);
-  elements.hpnum.textContent = `${data.hp}/ ${data.maxHp}`;
+  renderCombatantHp(key, data.hp, data.maxHp);
+}
+
+function renderCombatantHp(key, hp, maxHp) {
+  const elements = combatantElements(key);
+  elements.hp.style.width = `${hpBarPercent(hp, maxHp)}%`;
+  elements.hp.dataset.tone = hpTone(hp, maxHp);
+  elements.hpnum.textContent = `${hp}/ ${maxHp}`;
+}
+
+function playImpact(target) {
+  const elements = combatantElements(target);
+  const box = document.getElementById(`${target}-box`);
+  elements.element.classList.remove('hit');
+  box.classList.remove('hp-change');
+  void elements.element.offsetWidth;
+  elements.element.classList.add('hit');
+  box.classList.add('hp-change');
+  setTimeout(() => {
+    elements.element.classList.remove('hit');
+    box.classList.remove('hp-change');
+  }, 450);
 }
 
 function eventText(event) {
@@ -160,17 +180,29 @@ function playEvents(events) {
   for (const timer of eventTimers) clearTimeout(timer);
   eventTimers = [];
   setMenuOpen(false); // 연출 중에는 원작처럼 텍스트 박스를 보여준다
-  events.forEach((event, index) => {
+  battleEventSchedule(events).forEach(({ event, at }) => {
     eventTimers.push(setTimeout(() => {
       const text = eventText(event);
       if (text) message.textContent = text;
+      if (['damage', 'heal'].includes(event.kind) && ['player', 'enemy'].includes(event.target)) {
+        const maxHp = latest.battle[event.target].maxHp;
+        renderCombatantHp(event.target, event.hp, maxHp);
+      }
+      if (event.kind === 'damage' && ['player', 'enemy'].includes(event.target)) {
+        playImpact(event.target);
+      }
       damageFloat(event);
-    }, index * 300));
+    }, at));
   });
+  const timelineEnd = battleTimelineDuration(events);
+  eventTimers.push(setTimeout(() => {
+    renderCombatant('player', latest.battle.player);
+    renderCombatant('enemy', latest.battle.enemy);
+  }, timelineEnd));
   if (latest.battle.winner) {
     eventTimers.push(setTimeout(() => {
       showResult(latest);
-    }, events.length * 300 + 120));
+    }, timelineEnd + 120));
   }
 }
 
@@ -246,8 +278,11 @@ function render(payload) {
   latest = payload;
   localLock = Boolean(payload.resolving);
   root.classList.toggle('player-front-fallback', !payload.playerSpriteIsBack);
-  renderCombatant('player', payload.battle.player);
-  renderCombatant('enemy', payload.battle.enemy);
+  const visibleBattle = payload.events?.length && payload.previousBattle
+    ? payload.previousBattle
+    : payload.battle;
+  renderCombatant('player', visibleBattle.player);
+  renderCombatant('enemy', visibleBattle.enemy);
   drawSprite('player', payload.playerSprite);
   drawSprite('enemy', payload.enemySprite);
   ensureBattleMusic();

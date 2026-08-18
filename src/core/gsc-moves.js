@@ -34,3 +34,21 @@ export function gen2SkillsForStage(key, stage = 0) {
 export function gen2EffectForMove(key, slug) {
   return GEN2_SKILLS_BY_KEY[key]?.flat().find((move) => move.slug === slug)?.effect || null;
 }
+
+const FALLBACK_EFFECT_BY_TYPE = Object.freeze({
+  grass: 'gsc_razor_leaf',
+  fire: 'gsc_ember',
+  water: 'gsc_water_gun',
+  electric: 'gsc_thundershock',
+  ice: 'gsc_ice_punch',
+  dark: 'gsc_bite',
+  normal: 'gsc_quick_attack',
+});
+
+// AI-GENERATED: 야생 포켓몬 기술도 기존 Gold 타일 이펙트로 표현한다.
+export function gen2BattleEffectForMove(move) {
+  if (!move) return null;
+  const exact = Object.values(GEN2_SKILLS_BY_KEY).flat(2)
+    .find((entry) => entry.slug === move.slug)?.effect;
+  return exact || FALLBACK_EFFECT_BY_TYPE[move.type] || 'gsc_quick_attack';
+}

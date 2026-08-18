@@ -8,6 +8,7 @@ import { PokegoldAnimationVM } from './pokegold-anim-vm.js';
   const effect = query.get('effect') || 'leaf';
   const spriteSource = query.get('sprite');
   const useBattleLayout = query.get('layout') === 'battle';
+  const battleActor = query.get('actor') || 'player';
   const isPreview = query.get('preview') === '1';
   const frozenFrame = query.has('frame') ? Math.max(0, Number(query.get('frame')) || 0) : null;
   const isPokegold = effect.startsWith('gsc_');
@@ -326,7 +327,7 @@ import { PokegoldAnimationVM } from './pokegold-anim-vm.js';
     if (isPokegold) {
       const targetFrame = frozenFrame ?? Math.floor(elapsed * 60 / 1000);
       const state = pokegoldVm.seek(targetFrame);
-      const layout = useBattleLayout ? pokegoldBattleLayout(W, H) : null;
+      const layout = useBattleLayout ? pokegoldBattleLayout(W, H, battleActor === 'enemy') : null;
       pokegoldRenderer.render(ctx, state, { pokemonSprite, width: W, height: H, layout });
       document.documentElement.dataset.pokegoldFrame = String(state.frame);
       document.documentElement.dataset.pokegoldDone = String(state.done);

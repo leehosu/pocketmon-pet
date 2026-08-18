@@ -1,7 +1,9 @@
 // AI-GENERATED: pret/pokegold 기반 기술 데이터와 VM의 회귀 테스트.
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { GEN2_EFFECTS, GEN2_SKILLS_BY_KEY, gen2SkillsForStage } from '../src/core/gsc-moves.js';
+import {
+  GEN2_EFFECTS, GEN2_SKILLS_BY_KEY, gen2BattleEffectForMove, gen2SkillsForStage,
+} from '../src/core/gsc-moves.js';
 import {
   POKEGOLD_FRAMESETS,
   POKEGOLD_MOVES,
@@ -114,5 +116,15 @@ describe('Gold/Silver move roster', () => {
     expect(layout.user.y).toBeCloseTo(197.3);
     expect(layout.target.x).toBeCloseTo(444);
     expect(layout.target.y).toBeCloseTo(94.84);
+
+    const reverse = pokegoldBattleLayout(600, 460, true);
+    expect(reverse.user).toEqual(layout.target);
+    expect(reverse.target).toEqual(layout.user);
+  });
+
+  it('maps wild moves to exact or type-based Gold effects', () => {
+    expect(gen2BattleEffectForMove({ slug: 'ember', type: 'fire' })).toBe('gsc_ember');
+    expect(gen2BattleEffectForMove({ slug: 'tackle', type: 'normal' })).toBe('gsc_quick_attack');
+    expect(gen2BattleEffectForMove({ slug: 'vine-whip', type: 'grass' })).toBe('gsc_razor_leaf');
   });
 });
