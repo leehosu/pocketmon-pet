@@ -19,7 +19,12 @@ import { SPRITE_DIR, parseSpriteFileName } from '../core/sprite-files.js';
 import {
   dexLine, spriteUrl, backSpriteUrl, cryUrl, pokemonUrl, moveUrl, moveValueForVersion,
 } from '../core/pokeapi.js';
-import { GEN2_EFFECTS, gen2SkillsForStage } from '../core/gsc-moves.js';
+import {
+  GEN2_EFFECTS, gen2BattleEffectForMove, gen2SkillsForStage,
+} from '../core/gsc-moves.js';
+import {
+  BATTLE_ACTION_MS, BATTLE_DETAIL_MS, battleEventSchedule, battleTimelineDuration,
+} from '../core/battle-timeline.js';
 import { applyBattleExperience, localDateKey } from '../core/xp-engine.js';
 import {
   createBattleProfile,
@@ -110,6 +115,7 @@ let currentBattle = null;
 let encounterPreparing = false;
 let encounterExpiryTimer = null;
 let battleTurnTimer = null;
+let battleEffectTimers = [];
 const pendingSpriteLines = new Set();
 
 // ---- readEvents(): hook이 append하는 서명된 events.jsonl을 증분 읽기 + 검증 ----
@@ -715,7 +721,7 @@ function runEncounterScheduler(now = Date.now()) {
   if (now >= nextEncounterAt) prepareAndShowWildEncounter();
 }
 
-function battlePayload(events = []) {
+function battlePayload(events = [], previousBattle = null) {
   if (!currentBattle) return null;
   return {
     battleId: currentBattle.id,
@@ -726,6 +732,7 @@ function battlePayload(events = []) {
     level: state?.level || 1,
     resultChanges: currentBattle.resultChanges,
     battle: currentBattle.battle,
+    previousBattle,
     events,
     playerMoves: currentBattle.playerMoves,
     playerSprite: currentBattle.playerSprite,
@@ -735,10 +742,17 @@ function battlePayload(events = []) {
   };
 }
 
-function sendBattleState(events = []) {
+function sendBattleState(events = [], previousBattle = null) {
   if (!battleWindow || battleWindow.isDestroyed()) return;
-  const payload = battlePayload(events);
+  const payload = battlePayload(events, previousBattle);
   if (payload) battleWindow.webContents.send('battle-state', payload);
+}
+
+function clearBattleEffects(closeCurrent = false) {
+  for (const timer of battleEffectTimers) clearTimeout(timer);
+  battleEffectTimers = [];
+  if (closeCurrent && effectWin && !effectWin.isDestroyed()) effectWin.close();
+  if (closeCurrent) effectWin = null;
 }
 
 function restorePetWindow() {
@@ -751,6 +765,7 @@ function restorePetWindow() {
 function finishBattleSession() {
   if (battleTurnTimer) clearTimeout(battleTurnTimer);
   battleTurnTimer = null;
+  clearBattleEffects(true);
   const win = battleWindow;
   battleWindow = null;
   restorePetWindow();
@@ -792,6 +807,7 @@ function createBattleWindow(anchorBounds) {
     battleWindow = null;
     if (battleTurnTimer) clearTimeout(battleTurnTimer);
     battleTurnTimer = null;
+    clearBattleEffects(true);
     restorePetWindow();
     currentBattle = null;
     nextEncounterAt = 0;
@@ -866,20 +882,46 @@ function commitBattleOutcome() {
   saveState(dataDir(), state);
 }
 
-function playResolvedPlayerEffect(events) {
-  if (!currentBattle) return;
-  const moveEvent = events.find((event) => event.kind === 'move' && event.actor === 'player');
-  if (!moveEvent) return;
-  const chargeOnly = events.some((event) => event.kind === 'charge' && event.actor === 'player')
-    && !events.some((event) => event.kind === 'damage' && event.target === 'enemy');
-  if (chargeOnly) return;
-  const move = currentBattle.playerMoves.find((entry) => entry.slug === moveEvent.moveSlug);
-  if (!move) return;
-  const effectBounds = battleWindow && !battleWindow.isDestroyed()
-    ? battleWindow.getBounds()
-    : undefined;
-  // 배틀 DOM에 아군이 이미 있으므로 오버레이에는 스프라이트를 다시 그리지 않는다.
-  playSkillEffect(move.effect, { layout: 'battle' }, effectBounds);
+function moveEventsUntilNextAction(events, index) {
+  const next = events.findIndex((event, eventIndex) => eventIndex > index
+    && ['move', 'unable'].includes(event.kind));
+  return events.slice(index + 1, next < 0 ? events.length : next);
+}
+
+function effectForMoveEvent(event) {
+  if (!currentBattle || event.kind !== 'move') return null;
+  if (event.actor === 'player') {
+    return currentBattle.playerMoves.find((entry) => entry.slug === event.moveSlug)?.effect || null;
+  }
+  const move = currentBattle.battle.enemy.moves.find((entry) => (
+    (event.moveSlug && entry.slug === event.moveSlug) || entry.id === event.moveId
+  ));
+  return gen2BattleEffectForMove(move);
+}
+
+function playResolvedBattleEffects(events) {
+  if (!currentBattle) return 0;
+  clearBattleEffects(true);
+  const battleId = currentBattle.id;
+  let lastEffectAt = 0;
+
+  battleEventSchedule(events).forEach(({ event, at }, index) => {
+    if (event.kind !== 'move') return;
+    const resolution = moveEventsUntilNextAction(events, index);
+    const target = event.actor === 'player' ? 'enemy' : 'player';
+    const chargeOnly = resolution.some((entry) => entry.kind === 'charge' && entry.actor === event.actor)
+      && !resolution.some((entry) => entry.kind === 'damage' && entry.target === target);
+    const effect = chargeOnly ? null : effectForMoveEvent(event);
+    if (!effect) return;
+    lastEffectAt = Math.max(lastEffectAt, at);
+    const play = () => {
+      if (!currentBattle || currentBattle.id !== battleId || !battleWindow || battleWindow.isDestroyed()) return;
+      playSkillEffect(effect, { layout: 'battle', actor: event.actor }, battleWindow.getBounds());
+    };
+    if (at === 0) play();
+    else battleEffectTimers.push(setTimeout(play, at));
+  });
+  return lastEffectAt;
 }
 
 function resolveBattleMove(payload) {
@@ -887,14 +929,18 @@ function resolveBattleMove(payload) {
   if (payload?.battleId !== currentBattle.id || Number(payload?.turn) !== currentBattle.battle.turn) return;
   if (!currentBattle.playerMoves.some((move) => move.slug === payload.moveSlug)) return;
   currentBattle.resolving = true;
-  const result = resolveGen2Turn(currentBattle.battle, payload.moveSlug, Math.random);
+  const previousBattle = currentBattle.battle;
+  const result = resolveGen2Turn(previousBattle, payload.moveSlug, Math.random);
   currentBattle.battle = result.state;
   commitBattleOutcome();
-  sendBattleState(result.events);
-  playResolvedPlayerEffect(result.events);
-  const selectedMove = currentBattle.playerMoves.find((move) => move.slug === payload.moveSlug);
-  const effectDelay = selectedMove?.effect?.startsWith('gsc_') ? POKEGOLD_EFFECT_DURATION_MS : EFFECT_DURATION_MS;
-  const resultDelay = Math.max(effectDelay, result.events.length * 300 + 120 + RESULT_HOLD_MS);
+  sendBattleState(result.events, previousBattle);
+  const lastEffectAt = playResolvedBattleEffects(result.events);
+  const timelineEnd = battleTimelineDuration(result.events);
+  const effectsEnd = lastEffectAt + BATTLE_ACTION_MS;
+  const resultDelay = Math.max(
+    effectsEnd,
+    timelineEnd + (currentBattle.battle.winner ? RESULT_HOLD_MS : BATTLE_DETAIL_MS),
+  );
   battleTurnTimer = setTimeout(() => {
     battleTurnTimer = null;
     if (!currentBattle) return;
@@ -1099,4 +1145,5 @@ app.on('before-quit', () => {
   if (intervalId) clearInterval(intervalId);
   if (encounterExpiryTimer) clearTimeout(encounterExpiryTimer);
   if (battleTurnTimer) clearTimeout(battleTurnTimer);
+  clearBattleEffects(true);
 });
