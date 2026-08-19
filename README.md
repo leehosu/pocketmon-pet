@@ -53,6 +53,16 @@ Electron 기반 투명·항상-위(always-on-top) 창으로 동작하며, 상태
 
 ## 설치
 
+### Homebrew
+
+```bash
+brew install --cask leehosu/tap/pocketmon-pet
+```
+
+업그레이드는 `brew upgrade --cask pocketmon-pet`, 삭제는 `brew uninstall --cask pocketmon-pet`으로 실행합니다.
+
+### 소스 실행
+
 ```bash
 npm install
 ```
@@ -204,6 +214,30 @@ npx vitest run   # 또는 npm test
 npm run generate:pokegold-wild -- /path/to/pokegold
 npm run generate:pokegold-music -- /path/to/pokegold
 ```
+
+## macOS 릴리스
+
+CommitMate와 동일한 `leehosu/homebrew-tap`을 사용합니다. `v<package.json version>` 태그를 올리면
+`.github/workflows/release.yml`이 테스트 → Universal DMG/ZIP 빌드 → 서명·공증 → GitHub Release →
+`Casks/pocketmon-pet.rb` 갱신 순서로 실행됩니다.
+
+릴리스 전에 저장소 Actions secrets에 아래 값을 등록해야 합니다.
+
+- `HOMEBREW_TAP_TOKEN`: `leehosu/homebrew-tap` Contents 쓰기 권한이 있는 토큰
+- `MACOS_CERTIFICATE`: Developer ID Application `.p12`의 Base64 값
+- `MACOS_CERTIFICATE_PASSWORD`
+- `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`
+
+```bash
+npm run generate:mac-icon
+npm run build:mac
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+롤백은 잘못된 GitHub Release를 내리고 태그를 삭제한 뒤, `homebrew-tap`의 Cask를 직전 버전으로
+되돌리는 PR을 병합하는 방식입니다. 사용자 데이터 `~/.pocketmon/`은 일반 삭제 시 보존되고
+`brew uninstall --zap --cask pocketmon-pet`에서만 제거됩니다.
 
 ## 포켓몬 스프라이트 · 울음소리 출처
 
