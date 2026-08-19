@@ -1,19 +1,26 @@
 {
   "name": "pocketmon-pet",
+  "productName": "Pocketmon Pet",
   "version": "0.1.0",
+  "description": "A Pokemon Gold-style desktop pet that grows while you code",
+  "author": "leehosu",
   "private": true,
   "type": "module",
   "main": "src/main/index.js",
   "scripts": {
     "start": "electron .",
     "test": "vitest run",
+    "build:mac": "electron-builder --config electron-builder.config.cjs --mac --universal --publish never",
+    "generate:mac-icon": "node scripts/generate-macos-icon.mjs",
+    "generate:homebrew-cask": "node scripts/generate-homebrew-cask.mjs",
     "generate:pokegold-music": "node scripts/generate-pokegold-battle-music.mjs",
     "generate:pokegold-wild": "node scripts/generate-pokegold-story-wild.mjs",
     "generate:pokegold": "node scripts/generate-pokegold-anim-data.mjs",
     "capture:pokegold": "electron scripts/capture-pokegold-effects.mjs"
   },
   "devDependencies": {
-    "electron": "41.7.1",
+    "electron": "^41.10.3",
+    "electron-builder": "^26.15.3",
     "vitest": "^3.2.7"
   }
 }
